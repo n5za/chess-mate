@@ -8,6 +8,14 @@ for the engine — Stockfish runs entirely on your device.
 > chess.com Terms of Service and can get your account banned. This tool
 > is meant for analysis and learning. Use at your own risk.
 
+## Demo
+
+![Screenshot](src/img%26videa/Pasted%20image.png)
+
+<video controls width="100%">
+  <source src="src/img%26videa/20260731_224051.mp4" type="video/mp4">
+</video>
+
 ## Install
 
 1. Open `chrome://extensions` (or `edge://extensions`)
