@@ -79,7 +79,9 @@ a guarantee — engine use in rated play always carries risk.
 
 ## Demo video
 
-[![Watch the demo](src/img-videa/Pasted%20image.png)](https://github.com/n5za/chess-mate/blob/main/src/img-videa/20260731_224051.mp4)
+![Demo video](src/img-videa/20260731_224051.gif)
+
+[Watch the original MP4 (with sound)](https://github.com/n5za/chess-mate/blob/main/src/img-videa/20260731_224051.mp4)
 
 ## Files
 
