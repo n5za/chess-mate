@@ -78,7 +78,9 @@ a guarantee — engine use in rated play always carries risk.
 | Show eval       | on      | Score badge next to the arrow        |
 
 ## Demo video
-<video src="./src/img-videa/20260731_224051.mp4" controls width="100%"></video>
+
+[![Watch the demo](src/img-videa/Pasted%20image.png)](https://github.com/n5za/chess-mate/blob/main/src/img-videa/20260731_224051.mp4)
+
 ## Files
 
 ```
