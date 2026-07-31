@@ -1,28 +1,35 @@
 const $ = (id) => document.getElementById(id);
 const KEYS = ['enabled', 'mode', 'depth', 'movetime', 'liveMovetime', 'liveOnlyOwnTurn', 'showEval', 'hideMode', 'delayMin', 'delayMax', 'autoPlay', 'autoPlayDelayMin', 'autoPlayDelayMax', 'autoPlaySecondChance', 'naturalThink', 'idleMouse'];
 const AP_MIN = 3, AP_MAX = 15;
+let loaded = null;
 
 chrome.storage.sync.get(Object.fromEntries(KEYS.map((k) => [k, undefined])), (s) => {
-  $('enabled').checked = s.enabled !== false;
-  $('mode').value = s.mode || 'both';
-  $('depth').value = s.depth ?? 18;
-  $('movetime').value = s.movetime ?? 2500;
-  $('liveMovetime').value = s.liveMovetime ?? 2000;
-  $('liveOnlyOwnTurn').checked = s.liveOnlyOwnTurn !== false;
-  $('showEval').checked = s.showEval !== false;
-  $('hideMode').value = s.hideMode || 'always';
-  $('delayMin').value = s.delayMin ?? 0;
-  $('delayMax').value = s.delayMax ?? 0;
-  $('autoPlay').checked = !!s.autoPlay;
-  $('autoPlayDelayMin').value = s.autoPlayDelayMin ?? AP_MIN;
-  $('autoPlayDelayMax').value = s.autoPlayDelayMax ?? AP_MAX;
-  $('autoPlaySecondChance').value = s.autoPlaySecondChance ?? 10;
-  $('naturalThink').checked = s.naturalThink !== false;
-  $('idleMouse').checked = s.idleMouse !== false;
+  if (chrome.runtime.lastError) {
+    console.warn('[ChessMate] storage read failed:', chrome.runtime.lastError);
+    s = {};
+  }
+  loaded = s || {};
+  const st = loaded;
+  $('enabled').checked = st.enabled !== false;
+  $('mode').value = st.mode || 'both';
+  $('depth').value = st.depth ?? 18;
+  $('movetime').value = st.movetime ?? 2500;
+  $('liveMovetime').value = st.liveMovetime ?? 2000;
+  $('liveOnlyOwnTurn').checked = st.liveOnlyOwnTurn !== false;
+  $('showEval').checked = st.showEval !== false;
+  $('hideMode').value = st.hideMode || 'always';
+  $('delayMin').value = st.delayMin ?? 0;
+  $('delayMax').value = st.delayMax ?? 0;
+  $('autoPlay').checked = !!st.autoPlay;
+  $('autoPlayDelayMin').value = st.autoPlayDelayMin ?? AP_MIN;
+  $('autoPlayDelayMax').value = st.autoPlayDelayMax ?? AP_MAX;
+  $('autoPlaySecondChance').value = st.autoPlaySecondChance ?? 10;
+  $('naturalThink').checked = st.naturalThink !== false;
+  $('idleMouse').checked = st.idleMouse !== false;
   syncLabels();
 });
 
-function save() {
+function collect() {
   const data = {
     enabled: $('enabled').checked,
     mode: $('mode').value,
@@ -43,7 +50,27 @@ function save() {
   };
   if (data.delayMax < data.delayMin) data.delayMax = data.delayMin;
   if (data.autoPlayDelayMax < data.autoPlayDelayMin) data.autoPlayDelayMax = data.autoPlayDelayMin;
-  chrome.storage.sync.set(data);
+  return data;
+}
+
+function save() {
+  const data = collect();
+  const diff = {};
+  for (const k of KEYS) {
+    const prev = loaded ? loaded[k] : undefined;
+    if (prev === undefined || prev !== data[k]) diff[k] = data[k];
+  }
+  if (Object.keys(diff).length === 0) {
+    syncLabels();
+    return;
+  }
+  chrome.storage.sync.set(diff, () => {
+    if (chrome.runtime.lastError) {
+      console.warn('[ChessMate] save failed:', chrome.runtime.lastError);
+      return;
+    }
+    for (const k of Object.keys(diff)) loaded[k] = diff[k];
+  });
   syncLabels();
 }
 
