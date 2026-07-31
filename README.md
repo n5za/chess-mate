@@ -10,7 +10,7 @@ for the engine — Stockfish runs entirely on your device.
 
 ## Demo
 
-![Screenshot](src/img%26videa/Pasted%20image.png)
+![Screenshot](src/img-videa/Pasted%20image.png)
 
 ## Install
 
@@ -80,7 +80,7 @@ a guarantee — engine use in rated play always carries risk.
 ## Demo video
 
 <video controls width="100%">
-  <source src="src/img%26videa/20260731_224051.mp4" type="video/mp4">
+  <source src="src/img-videa/20260731_224051.mp4" type="video/mp4">
 </video>
 
 ## Files
