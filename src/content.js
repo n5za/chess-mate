@@ -18,7 +18,9 @@
     autoPlayDelayMax: 15,
     autoPlaySecondChance: 10, // % chance to play the 2nd-best move
     naturalThink: true,  // human think-time model (mood, complexity, clock pressure)
-    idleMouse: true      // subtle idle mouse movement while waiting
+    idleMouse: true,     // subtle idle mouse movement while waiting
+    autoNextGame: false, // after a game ends, start the next one automatically
+    autoNextTime: '10'   // time control (minutes) for the next game
   };
 
   let settings = { ...DEFAULTS };
@@ -48,6 +50,7 @@
   let wanderTimer = null;
   let clickPlayActive = false;
   let gameOverRetries = 0;
+  let autoNextTimer = null;
 
   chrome.storage.sync.get(DEFAULTS, (s) => { settings = { ...DEFAULTS, ...s }; });
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -1151,12 +1154,115 @@
     });
   }
 
+  function humanClickEl(el) {
+    const r = el.getBoundingClientRect();
+    if (!r || r.width <= 0 || r.height <= 0) return false;
+    humanClick(r.left + r.width / 2 + rand(-3, 3), r.top + r.height / 2 + rand(-3, 3));
+    return true;
+  }
+
+  function findElByText(re, sel) {
+    const els = queryAllInShadow(document, sel);
+    for (const el of els) {
+      try {
+        if (el.getBoundingClientRect().width <= 0) continue;
+      } catch (e) {}
+      const t = (el.innerText || el.textContent || '').trim();
+      if (re.test(t)) return el;
+    }
+    return null;
+  }
+
+  function isLobby() {
+    return location.pathname.indexOf('/play/online') === 0 || !!document.querySelector('[class*="lobby"]');
+  }
+
+  function setAutoQueue() {
+    chrome.storage.local.set({ chessmateAutoQueue: { time: String(settings.autoNextTime || '10'), ts: Date.now() } });
+  }
+
+  function clearAutoQueue() {
+    chrome.storage.local.remove('chessmateAutoQueue');
+  }
+
+  function maybeStartNextGame() {
+    if (!settings.autoNextGame || autoNextTimer) return;
+    autoNextTimer = setTimeout(() => {
+      autoNextTimer = null;
+      doStartNextGame();
+    }, rand(2500, 5000));
+  }
+
+  function doStartNextGame() {
+    if (!settings.autoNextGame || !isGameOver()) return;
+    const rematch = findElByText(/play again|rematch/i, 'button, [role="button"], [class*="game-over"] button');
+    if (rematch) {
+      debugLog('auto-next: rematch clicked');
+      humanClickEl(rematch);
+      return;
+    }
+    debugLog('auto-next: no rematch, queueing a new game');
+    setAutoQueue();
+    if (isLobby()) {
+      doLobbyQueue();
+    } else {
+      location.href = 'https://www.chess.com/play/online';
+    }
+  }
+
+  function doLobbyQueue() {
+    const time = String(settings.autoNextTime || '10');
+    let attempts = 0;
+    const safe = time.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tryPlay = () => {
+      if (!settings.autoNextGame) return clearAutoQueue();
+      const card = findElByText(new RegExp('^\\s*' + safe + '\\s*min', 'i'),
+        'button, [role="button"], [class*="preset"], [class*="time-control"], [class*="time-select"]');
+      if (card) {
+        debugLog('auto-next: time control ' + time + ' min clicked');
+        humanClickEl(card);
+      }
+      setTimeout(() => {
+        const play = findElByText(/^\s*play\s*$/i, 'button');
+        if (play) {
+          debugLog('auto-next: play clicked');
+          humanClickEl(play);
+          setTimeout(clearAutoQueue, 3000);
+          return;
+        }
+        attempts++;
+        if (attempts < 6) setTimeout(tryPlay, 2000);
+        else clearAutoQueue();
+      }, rand(500, 1100));
+    };
+    tryPlay();
+  }
+
+  function handleAutoQueueIntent() {
+    chrome.storage.local.get('chessmateAutoQueue', (r) => {
+      const q = r && r.chessmateAutoQueue;
+      if (!q) return;
+      if (!settings.autoNextGame) return clearAutoQueue();
+      if (Date.now() - q.ts > 120000) return clearAutoQueue();
+      if (isLobby()) return doLobbyQueue();
+      if (isLiveView()) {
+        if (isGameOver()) maybeStartNextGame();
+        else clearAutoQueue();
+      }
+    });
+  }
+
   function boot() {
     update();
     setupObservers();
     setupStealthListeners();
     startWanderLoop();
-    setInterval(update, 4000);
+    handleAutoQueueIntent();
+    setInterval(() => {
+      update();
+      if (isGameOver()) maybeStartNextGame();
+      handleAutoQueueIntent();
+    }, 4000);
   }
 
   if (document.readyState === 'loading') {
@@ -1174,6 +1280,10 @@
       startWanderLoop,
       cancelWander,
       doWander,
+      doStartNextGame,
+      doLobbyQueue,
+      handleAutoQueueIntent,
+      maybeStartNextGame,
       resetMood: () => { gameMood = null; }
     };
   }

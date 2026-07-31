@@ -88,6 +88,19 @@
     <input type="checkbox" id="idleMouse">
     Idle mouse movement while waiting
   </label>
+  <label class="check">
+    <input type="checkbox" id="autoNextGame">
+    Auto next game (keep playing forever)
+  </label>
+  <div class="row">
+    <label for="autoNextTime">Game time: <span id="autoNextTimeVal">10 min</span></label>
+    <select id="autoNextTime">
+      <option value="5">5 min</option>
+      <option value="10">10 min</option>
+      <option value="15">15 min</option>
+      <option value="30">30 min</option>
+    </select>
+  </div>
 
   <footer>
     Stockfish runs locally on your device.
