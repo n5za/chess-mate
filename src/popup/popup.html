@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ChessMate</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <span class="logo">♞ ChessMate</span>
+    <label class="switch">
+      <input type="checkbox" id="enabled">
+      <span class="slider"></span>
+    </label>
+  </header>
+
+  <div class="row">
+    <label for="mode">Mode</label>
+    <select id="mode">
+      <option value="both">Live + Analysis</option>
+      <option value="live">Live only</option>
+      <option value="analysis">Analysis only</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label for="depth">Depth: <span id="depthVal">16</span></label>
+    <input type="range" id="depth" min="8" max="24" step="1">
+  </div>
+
+  <div class="row">
+    <label for="movetime">Analysis time: <span id="movetimeVal">2.5s</span></label>
+    <input type="range" id="movetime" min="500" max="8000" step="500">
+  </div>
+
+  <div class="row">
+    <label for="liveMovetime">Live time: <span id="liveMovetimeVal">1.5s</span></label>
+    <input type="range" id="liveMovetime" min="300" max="5000" step="100">
+  </div>
+
+  <div class="row">
+    <label for="hideMode">Show arrows</label>
+    <select id="hideMode">
+      <option value="always">Always</option>
+      <option value="alt">Only while holding Alt</option>
+      <option value="hover">Only while mouse on board</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label for="delayMin">Think delay (live): <span id="delayVal">0–0s</span></label>
+    <div class="duo">
+      <input type="range" id="delayMin" min="0" max="8" step="0.5">
+      <input type="range" id="delayMax" min="0" max="8" step="0.5">
+    </div>
+  </div>
+
+  <label class="check">
+    <input type="checkbox" id="liveOnlyOwnTurn" checked>
+    Live: show only on your turn
+  </label>
+  <label class="check">
+    <input type="checkbox" id="showEval" checked>
+    Show evaluation score
+  </label>
+
+  <div class="section-title">Auto-play</div>
+  <label class="check">
+    <input type="checkbox" id="autoPlay">
+    Play the move for me (human-like)
+  </label>
+  <div class="row">
+    <label for="autoPlayDelayMin">Move delay: <span id="autoDelayVal">3–15s</span></label>
+    <div class="duo">
+      <input type="range" id="autoPlayDelayMin" min="0.5" max="30" step="0.5">
+      <input type="range" id="autoPlayDelayMax" min="0.5" max="30" step="0.5">
+    </div>
+  </div>
+  <div class="row">
+    <label for="autoPlaySecondChance">2nd best move chance: <span id="secondChanceVal">10%</span></label>
+    <input type="range" id="autoPlaySecondChance" min="0" max="50" step="5">
+  </div>
+  <label class="check">
+    <input type="checkbox" id="naturalThink">
+    Human thinking (fast on forced moves, slow on complex)
+  </label>
+  <label class="check">
+    <input type="checkbox" id="idleMouse">
+    Idle mouse movement while waiting
+  </label>
+
+  <footer>
+    Stockfish runs locally on your device.
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
