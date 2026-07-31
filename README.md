@@ -12,10 +12,6 @@ for the engine — Stockfish runs entirely on your device.
 
 ![Screenshot](src/img%26videa/Pasted%20image.png)
 
-<video controls width="100%">
-  <source src="src/img%26videa/20260731_224051.mp4" type="video/mp4">
-</video>
-
 ## Install
 
 1. Open `chrome://extensions` (or `edge://extensions`)
@@ -80,6 +76,12 @@ a guarantee — engine use in rated play always carries risk.
 | Think delay     | 0–0s    | Random delay before showing in live  |
 | Only your turn  | on      | In live games, hide on opponent's turn |
 | Show eval       | on      | Score badge next to the arrow        |
+
+## Demo video
+
+<video controls width="100%">
+  <source src="src/img%26videa/20260731_224051.mp4" type="video/mp4">
+</video>
 
 ## Files
 
