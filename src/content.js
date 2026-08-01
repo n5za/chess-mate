@@ -54,11 +54,30 @@
   let autoNextTimer = null;
   let detectedTimeMin = null;
 
-  chrome.storage.sync.get(DEFAULTS, (s) => { settings = { ...DEFAULTS, ...s }; });
+  // Settings: local storage is the source of truth (survives extension reloads,
+  // never reset by the sync layer). Sync is only a fallback for older installs.
+  function loadSettings(cb) {
+    chrome.storage.local.get(DEFAULTS, (loc) => {
+      const hasLocal = loc && Object.keys(loc).length > 0;
+      if (hasLocal) {
+        settings = { ...DEFAULTS, ...loc };
+        if (cb) cb();
+        return;
+      }
+      chrome.storage.sync.get(DEFAULTS, (syn) => {
+        settings = { ...DEFAULTS, ...(syn || {}) };
+        if (cb) cb();
+      });
+    });
+  }
+
+  loadSettings();
+
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'sync') return;
+    if (area !== 'sync' && area !== 'local') return;
     for (const k of Object.keys(changes)) {
-      settings[k] = changes[k].newValue;
+      if (changes[k].newValue === undefined) delete settings[k];
+      else settings[k] = changes[k].newValue;
       if (k === 'autoPlay' && changes[k].newValue) gameMood = null;
     }
   });

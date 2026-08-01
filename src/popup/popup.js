@@ -2,12 +2,39 @@ const $ = (id) => document.getElementById(id);
 const KEYS = ['enabled', 'mode', 'depth', 'movetime', 'liveMovetime', 'liveOnlyOwnTurn', 'showEval', 'hideMode', 'delayMin', 'delayMax', 'autoPlay', 'speed', 'autoPlaySecondChance', 'naturalThink', 'idleMouse', 'autoNextGame', 'autoNextTime'];
 let loaded = null;
 
-chrome.storage.sync.get(Object.fromEntries(KEYS.map((k) => [k, undefined])), (s) => {
-  if (chrome.runtime.lastError) {
-    console.warn('[ChessMate] storage read failed:', chrome.runtime.lastError);
-    s = {};
+// Local storage is the source of truth (settings survive extension reloads).
+// Sync is only a fallback/mirror.
+function readStore(cb) {
+  chrome.storage.local.get(Object.fromEntries(KEYS.map((k) => [k, undefined])), (loc) => {
+    if (chrome.runtime.lastError) loc = {};
+    if (loc && Object.keys(loc).length > 0) { cb(loc || {}); return; }
+    chrome.storage.sync.get(Object.fromEntries(KEYS.map((k) => [k, undefined])), (syn) => {
+      cb(chrome.runtime.lastError ? {} : (syn || {}));
+    });
+  });
+}
+
+function writeStore(data, cb) {
+  chrome.storage.local.set(data, () => {
+    if (chrome.runtime.lastError) console.warn('[ChessMate] local save failed:', chrome.runtime.lastError);
+    if (cb) cb();
+  });
+  chrome.storage.sync.set(data, () => {
+    if (chrome.runtime.lastError) console.warn('[ChessMate] sync save failed:', chrome.runtime.lastError);
+  });
+}
+
+// Keep our view of storage fresh so we never overwrite newer values.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (!loaded || (area !== 'local' && area !== 'sync')) return;
+  for (const k of Object.keys(changes)) {
+    if (changes[k].newValue === undefined) delete loaded[k];
+    else loaded[k] = changes[k].newValue;
   }
-  loaded = s || {};
+});
+
+readStore((storeData) => {
+  loaded = storeData || {};
   const st = loaded;
   $('enabled').checked = st.enabled !== false;
   $('mode').value = st.mode || 'both';
@@ -64,11 +91,7 @@ function save() {
     syncLabels();
     return;
   }
-  chrome.storage.sync.set(diff, () => {
-    if (chrome.runtime.lastError) {
-      console.warn('[ChessMate] save failed:', chrome.runtime.lastError);
-      return;
-    }
+  writeStore(diff, () => {
     for (const k of Object.keys(diff)) loaded[k] = diff[k];
   });
   syncLabels();
