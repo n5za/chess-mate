@@ -8,8 +8,7 @@
     "offscreen"
   ],
   "host_permissions": [
-    "https://www.chess.com/*",
-    "https://monkeytype.com/*"
+    "https://www.chess.com/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
@@ -36,15 +35,6 @@
       ],
       "js": [
         "src/content.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://monkeytype.com/*"
-      ],
-      "js": [
-        "src/monkeytype.js"
       ],
       "run_at": "document_idle"
     }
