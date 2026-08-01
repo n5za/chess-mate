@@ -102,7 +102,7 @@ function syncLabels() {
   $('movetimeVal').textContent = (parseInt($('movetime').value, 10) / 1000) + 's';
   $('liveMovetimeVal').textContent = (parseInt($('liveMovetime').value, 10) / 1000) + 's';
   $('delayVal').textContent = parseFloat($('delayMin').value) + '–' + parseFloat($('delayMax').value) + 's';
-  const speedMap = { auto: 'Auto', slow: 'Slow', normal: 'Normal', fast: 'Fast' };
+  const speedMap = { auto: 'Auto', turbo: 'Turbo', slow: 'Slow', normal: 'Normal', fast: 'Fast' };
   $('speedVal').textContent = speedMap[$('speed').value] || 'Auto';
   $('secondChanceVal').textContent = parseInt($('autoPlaySecondChance').value, 10) + '%';
   const nt = $('autoNextTime').value;

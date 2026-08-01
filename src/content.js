@@ -429,12 +429,13 @@
       else if (minutes <= 30) { min = 5; max = 25; }
       else { min = 6; max = 30; }
     }
-    const f = settings.speed === 'slow' ? 1.6 : settings.speed === 'fast' ? 0.5 : 1;
+    const f = settings.speed === 'slow' ? 1.6 : settings.speed === 'fast' ? 0.5 : settings.speed === 'turbo' ? 0.25 : 1;
     return [Math.max(0.4, min * f), Math.max(min * f, max * f)];
   }
 
   function engineTimeMs() {
     const minutes = detectTimeControl();
+    if (settings.speed === 'turbo') return Math.min(settings.liveMovetime, 600);
     if (minutes === null) return settings.liveMovetime;
     if (minutes <= 1) return Math.min(settings.liveMovetime, 800);
     if (minutes <= 3) return Math.min(settings.liveMovetime, 1500);
