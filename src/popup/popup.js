@@ -1,6 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const KEYS = ['enabled', 'mode', 'depth', 'movetime', 'liveMovetime', 'liveOnlyOwnTurn', 'showEval', 'hideMode', 'delayMin', 'delayMax', 'autoPlay', 'autoPlayDelayMin', 'autoPlayDelayMax', 'autoPlaySecondChance', 'naturalThink', 'idleMouse', 'autoNextGame', 'autoNextTime'];
-const AP_MIN = 3, AP_MAX = 15;
+const KEYS = ['enabled', 'mode', 'depth', 'movetime', 'liveMovetime', 'liveOnlyOwnTurn', 'showEval', 'hideMode', 'delayMin', 'delayMax', 'autoPlay', 'speed', 'autoPlaySecondChance', 'naturalThink', 'idleMouse', 'autoNextGame', 'autoNextTime'];
 let loaded = null;
 
 chrome.storage.sync.get(Object.fromEntries(KEYS.map((k) => [k, undefined])), (s) => {
@@ -21,8 +20,7 @@ chrome.storage.sync.get(Object.fromEntries(KEYS.map((k) => [k, undefined])), (s)
   $('delayMin').value = st.delayMin ?? 0;
   $('delayMax').value = st.delayMax ?? 0;
   $('autoPlay').checked = !!st.autoPlay;
-  $('autoPlayDelayMin').value = st.autoPlayDelayMin ?? AP_MIN;
-  $('autoPlayDelayMax').value = st.autoPlayDelayMax ?? AP_MAX;
+  $('speed').value = st.speed || 'auto';
   $('autoPlaySecondChance').value = st.autoPlaySecondChance ?? 10;
   $('naturalThink').checked = st.naturalThink !== false;
   $('idleMouse').checked = st.idleMouse !== false;
@@ -44,8 +42,7 @@ function collect() {
     delayMin: parseFloat($('delayMin').value),
     delayMax: parseFloat($('delayMax').value),
     autoPlay: $('autoPlay').checked,
-    autoPlayDelayMin: parseFloat($('autoPlayDelayMin').value),
-    autoPlayDelayMax: parseFloat($('autoPlayDelayMax').value),
+    speed: $('speed').value,
     autoPlaySecondChance: parseInt($('autoPlaySecondChance').value, 10),
     naturalThink: $('naturalThink').checked,
     idleMouse: $('idleMouse').checked,
@@ -53,7 +50,6 @@ function collect() {
     autoNextTime: $('autoNextTime').value
   };
   if (data.delayMax < data.delayMin) data.delayMax = data.delayMin;
-  if (data.autoPlayDelayMax < data.autoPlayDelayMin) data.autoPlayDelayMax = data.autoPlayDelayMin;
   return data;
 }
 
@@ -83,7 +79,8 @@ function syncLabels() {
   $('movetimeVal').textContent = (parseInt($('movetime').value, 10) / 1000) + 's';
   $('liveMovetimeVal').textContent = (parseInt($('liveMovetime').value, 10) / 1000) + 's';
   $('delayVal').textContent = parseFloat($('delayMin').value) + '–' + parseFloat($('delayMax').value) + 's';
-  $('autoDelayVal').textContent = parseFloat($('autoPlayDelayMin').value) + '–' + parseFloat($('autoPlayDelayMax').value) + 's';
+  const speedMap = { auto: 'Auto', slow: 'Slow', normal: 'Normal', fast: 'Fast' };
+  $('speedVal').textContent = speedMap[$('speed').value] || 'Auto';
   $('secondChanceVal').textContent = parseInt($('autoPlaySecondChance').value, 10) + '%';
   const nt = $('autoNextTime').value;
   $('autoNextTimeVal').textContent = nt + ' min';

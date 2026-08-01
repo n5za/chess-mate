@@ -14,8 +14,9 @@
     delayMin: 0,         // seconds, random thinking delay (live only)
     delayMax: 0,
     autoPlay: false,     // auto-play the engine move
-    autoPlayDelayMin: 3, // seconds to wait before moving (random each move, human-like)
+    autoPlayDelayMin: 3, // fallback delay floor (used only when the time control can't be read)
     autoPlayDelayMax: 15,
+    speed: 'auto',       // auto: adapt to the game's time control; slow/normal/fast: scale it
     autoPlaySecondChance: 10, // % chance to play the 2nd-best move
     naturalThink: true,  // human think-time model (mood, complexity, clock pressure)
     idleMouse: true,     // subtle idle mouse movement while waiting
@@ -51,6 +52,7 @@
   let clickPlayActive = false;
   let gameOverRetries = 0;
   let autoNextTimer = null;
+  let detectedTimeMin = null;
 
   chrome.storage.sync.get(DEFAULTS, (s) => { settings = { ...DEFAULTS, ...s }; });
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -362,6 +364,65 @@
     return ((h * 60 + min) * 60 + sec) * 1000;
   }
 
+  // ── Time control detection / adaptive speed ──────────
+  // Reads the game's time control (e.g. "10 min", "1 | 0", "5 min (Blitz)")
+  // so the bot never loses on time. Detected once per game.
+  function detectTimeControl() {
+    if (detectedTimeMin !== null) return detectedTimeMin;
+    const sel = '[class*="game-header"], [class*="board-header"], [class*="header"], [class*="game-info"], [class*="title"], [class*="component-timer"], [class*="clock"]';
+    const texts = [];
+    queryAllInShadow(document, sel).forEach((el) => {
+      const t = (el.innerText || el.textContent || '').trim();
+      if (t) texts.push(t);
+    });
+    if (document.body) texts.push(document.body.innerText);
+    for (const t of texts) {
+      const m1 = t.match(/(\d+)\s*\|\s*(\d+)/);
+      if (m1) {
+        detectedTimeMin = Math.max(1, parseInt(m1[1], 10) + parseInt(m1[2], 10) / 2);
+        debugLog('time control detected: ' + m1[1] + '|' + m1[2] + ' (' + detectedTimeMin + ' min)');
+        return detectedTimeMin;
+      }
+      const m2 = t.match(/(\d+)\s*min\b/i);
+      if (m2) {
+        detectedTimeMin = Math.max(1, parseInt(m2[1], 10));
+        debugLog('time control detected: ' + m2[1] + ' min');
+        return detectedTimeMin;
+      }
+    }
+    return null;
+  }
+
+  function resetTimeControl() {
+    detectedTimeMin = null;
+  }
+
+  function adaptiveDelayRange() {
+    let min = settings.autoPlayDelayMin || 3;
+    let max = Math.max(min, settings.autoPlayDelayMax || 15);
+    const minutes = detectTimeControl();
+    if (minutes !== null) {
+      if (minutes <= 1) { min = 1; max = 2; }
+      else if (minutes <= 3) { min = 1.5; max = 4; }
+      else if (minutes <= 5) { min = 2; max = 7; }
+      else if (minutes <= 10) { min = 3; max = 15; }
+      else if (minutes <= 15) { min = 4; max = 20; }
+      else if (minutes <= 30) { min = 5; max = 25; }
+      else { min = 6; max = 30; }
+    }
+    const f = settings.speed === 'slow' ? 1.6 : settings.speed === 'fast' ? 0.5 : 1;
+    return [Math.max(0.4, min * f), Math.max(min * f, max * f)];
+  }
+
+  function engineTimeMs() {
+    const minutes = detectTimeControl();
+    if (minutes === null) return settings.liveMovetime;
+    if (minutes <= 1) return Math.min(settings.liveMovetime, 800);
+    if (minutes <= 3) return Math.min(settings.liveMovetime, 1500);
+    if (minutes <= 5) return Math.min(settings.liveMovetime, 2000);
+    return settings.liveMovetime;
+  }
+
   function detectCastling(board) {
     let rights = '';
     if (board[7][4] === 'K') {
@@ -410,7 +471,7 @@
       requestId: id,
       fen,
       depth: settings.depth,
-      movetime: isAnalysisView() ? settings.movetime : settings.liveMovetime,
+      movetime: isAnalysisView() ? settings.movetime : engineTimeMs(),
       multipv: settings.autoPlay && (settings.autoPlaySecondChance || 0) > 0 ? 2 : 1
     };
     chrome.runtime.sendMessage(payload);
@@ -674,7 +735,10 @@
       lastDrawKey = '';
       clearBestMove();
       const mc = countMoves();
-      if (lastMoveCount !== null && mc < lastMoveCount) gameMood = null;
+      if (lastMoveCount !== null && mc < lastMoveCount) {
+        gameMood = null;
+        resetTimeControl();
+      }
       lastMoveCount = mc;
       requestAnalysis(fen);
       debugLog('analyzing: ' + fen);
@@ -1030,17 +1094,19 @@
   }
 
   function sampleMood(lo, hi) {
+    const span = Math.max(0.2, hi - lo);
     const r = Math.random();
     let base;
-    if (r < 0.3) base = rand(2, 6);
-    else if (r < 0.8) base = rand(4, 10);
-    else base = rand(7, 15);
+    if (r < 0.3) base = lo + span * rand(0, 0.35);
+    else if (r < 0.8) base = lo + span * rand(0.3, 0.75);
+    else base = lo + span * rand(0.7, 1);
     return Math.min(hi, Math.max(lo, base));
   }
 
   function humanThinkDelay(result) {
-    const lo = Math.max(0.5, settings.autoPlayDelayMin || 3);
-    const hi = Math.max(lo, settings.autoPlayDelayMax || 15);
+    const range = adaptiveDelayRange();
+    const lo = range[0];
+    const hi = range[1];
     if (!settings.naturalThink) return rand(lo, hi);
     if (!gameMood) gameMood = sampleMood(lo, hi);
     let d = gameMood * rand(0.8, 1.2);
@@ -1053,7 +1119,7 @@
     const clockMs = readClockMs();
     if (clockMs !== null) {
       if (clockMs < 10000) return rand(0.5, 1.5);
-      if (clockMs < 30000) return rand(1, 3);
+      if (clockMs < 30000) return rand(1, 2.5);
     }
     return Math.min(hi, Math.max(lo, d));
   }
@@ -1277,6 +1343,10 @@
       readClockMs,
       pickMoveToPlay,
       scoreGapCp,
+      detectTimeControl,
+      adaptiveDelayRange,
+      engineTimeMs,
+      resetTimeControl,
       startWanderLoop,
       cancelWander,
       doWander,

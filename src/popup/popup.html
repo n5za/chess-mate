@@ -70,11 +70,13 @@
     Play the move for me (human-like)
   </label>
   <div class="row">
-    <label for="autoPlayDelayMin">Move delay: <span id="autoDelayVal">3–15s</span></label>
-    <div class="duo">
-      <input type="range" id="autoPlayDelayMin" min="0.5" max="30" step="0.5">
-      <input type="range" id="autoPlayDelayMax" min="0.5" max="30" step="0.5">
-    </div>
+    <label for="speed">Move speed: <span id="speedVal">Auto</span></label>
+    <select id="speed">
+      <option value="auto">Auto (adapts to game time)</option>
+      <option value="slow">Slow</option>
+      <option value="normal">Normal</option>
+      <option value="fast">Fast</option>
+    </select>
   </div>
   <div class="row">
     <label for="autoPlaySecondChance">2nd best move chance: <span id="secondChanceVal">10%</span></label>
