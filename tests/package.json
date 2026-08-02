@@ -1,0 +1,8 @@
+{
+  "name": "chessmate-tests",
+  "private": true,
+  "description": "DOM tests for ChessMate (content script + popup). Run with: node test-popup.js and xvfb-run -a node test-content.js (headless Brave at /opt/brave-bin/brave).",
+  "dependencies": {
+    "puppeteer-core": "^24.0.0"
+  }
+}

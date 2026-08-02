@@ -195,6 +195,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ pong: true });
     return false;
   }
+  if (msg.action === 'chessmate-engine-reset') {
+    if (worker) {
+      try { worker.terminate(); } catch (e) {}
+    }
+    worker = null;
+    isReady = false;
+    initAttempts = 0;
+    tryLaunch();
+    sendResponse({ ok: true });
+    return false;
+  }
   if (msg.action !== 'chessmate-engine-analyze') return false;
   pendingSearch = msg;
   if (searching) {

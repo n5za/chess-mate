@@ -2,6 +2,7 @@
   'use strict';
 
   const OVERLAY_ID = 'chessmate-overlay';
+  const SETTINGS_KEY = 'chessmateSettings';
   const DEFAULTS = {
     enabled: true,
     mode: 'both',        // 'both' | 'live' | 'analysis'
@@ -21,7 +22,8 @@
     naturalThink: true,  // human think-time model (mood, complexity, clock pressure)
     idleMouse: true,     // subtle idle mouse movement while waiting
     autoNextGame: false, // after a game ends, start the next one automatically
-    autoNextTime: '10'   // time control (minutes) for the next game
+    autoNextTime: '10',  // time control (minutes) for the next game
+    debug: false         // console logs (turn on from the console to debug)
   };
 
   let settings = { ...DEFAULTS };
@@ -54,20 +56,53 @@
   let autoNextTimer = null;
   let detectedTimeMin = null;
 
-  // Settings: local storage is the source of truth (survives extension reloads,
-  // never reset by the sync layer). Sync is only a fallback for older installs.
+  function isMyTurn() {
+    const fen = getFenFromDom();
+    if (!fen) return false;
+    return fenSideToMove(fen) === (isBoardFlipped() ? 'b' : 'w');
+  }
+
+  // Settings: one atomic key in local storage so nothing can be half-written
+  // or overwritten key-by-key. Old flat keys are migrated once into it.
+  function clampInt(v, lo, hi, d) {
+    v = parseInt(v, 10);
+    return isNaN(v) ? d : Math.min(hi, Math.max(lo, v));
+  }
+  function clampNum(v, lo, hi, d) {
+    v = parseFloat(v);
+    return isNaN(v) ? d : Math.min(hi, Math.max(lo, v));
+  }
+  function sanitizeSettings(s) {
+    const out = { ...DEFAULTS, ...(s || {}) };
+    out.depth = clampInt(out.depth, 1, 30, DEFAULTS.depth);
+    out.movetime = clampInt(out.movetime, 100, 60000, DEFAULTS.movetime);
+    out.liveMovetime = clampInt(out.liveMovetime, 100, 60000, DEFAULTS.liveMovetime);
+    out.delayMin = clampNum(out.delayMin, 0, 120, DEFAULTS.delayMin);
+    out.delayMax = clampNum(out.delayMax, 0, 120, DEFAULTS.delayMax);
+    if (out.delayMax < out.delayMin) out.delayMax = out.delayMin;
+    out.autoPlaySecondChance = clampInt(out.autoPlaySecondChance, 0, 100, DEFAULTS.autoPlaySecondChance);
+    if (!['both', 'live', 'analysis'].includes(out.mode)) out.mode = DEFAULTS.mode;
+    if (!['always', 'alt', 'hover'].includes(out.hideMode)) out.hideMode = DEFAULTS.hideMode;
+    if (!['auto', 'slow', 'normal', 'fast', 'turbo'].includes(out.speed)) out.speed = DEFAULTS.speed;
+    return out;
+  }
   function loadSettings(cb) {
-    chrome.storage.local.get(DEFAULTS, (loc) => {
-      const hasLocal = loc && Object.keys(loc).length > 0;
-      if (hasLocal) {
-        settings = { ...DEFAULTS, ...loc };
-        if (cb) cb();
-        return;
+    chrome.storage.local.get(null, (loc) => {
+      loc = loc || {};
+      let stored = null;
+      if (loc[SETTINGS_KEY] && typeof loc[SETTINGS_KEY] === 'object') {
+        stored = loc[SETTINGS_KEY];
+      } else {
+        stored = {};
+        for (const k of Object.keys(DEFAULTS)) {
+          if (loc[k] !== undefined) stored[k] = loc[k];
+        }
+        if (Object.keys(stored).length > 0) {
+          chrome.storage.local.set({ [SETTINGS_KEY]: stored });
+        }
       }
-      chrome.storage.sync.get(DEFAULTS, (syn) => {
-        settings = { ...DEFAULTS, ...(syn || {}) };
-        if (cb) cb();
-      });
+      settings = sanitizeSettings(stored);
+      if (cb) cb();
     });
   }
 
@@ -75,9 +110,14 @@
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'sync' && area !== 'local') return;
+    if (changes[SETTINGS_KEY] && changes[SETTINGS_KEY].newValue) {
+      settings = sanitizeSettings(changes[SETTINGS_KEY].newValue);
+      if (settings.autoPlay) gameMood = null;
+      return;
+    }
     for (const k of Object.keys(changes)) {
-      if (changes[k].newValue === undefined) delete settings[k];
-      else settings[k] = changes[k].newValue;
+      if (!(k in DEFAULTS)) continue;
+      settings[k] = changes[k].newValue === undefined ? DEFAULTS[k] : changes[k].newValue;
       if (k === 'autoPlay' && changes[k].newValue) gameMood = null;
     }
   });
@@ -386,27 +426,55 @@
   // ── Time control detection / adaptive speed ──────────
   // Reads the game's time control (e.g. "10 min", "1 | 0", "5 min (Blitz)")
   // so the bot never loses on time. Detected once per game.
+  // Reads game-area elements first (header, clocks, time selectors) so
+  // unrelated page text (countdowns, ads, puzzle timers) can't fool it.
   function detectTimeControl() {
     if (detectedTimeMin !== null) return detectedTimeMin;
-    const sel = '[class*="game-header"], [class*="board-header"], [class*="header"], [class*="game-info"], [class*="title"], [class*="component-timer"], [class*="clock"]';
+    const patterns = [
+      { re: /(\d+)\s*\|\s*(\d+)/, parse: (m) => Math.max(1, parseInt(m[1], 10) + parseInt(m[2], 10) / 2) },
+      { re: /(\d+)\s*min\b/i, parse: (m) => Math.max(1, parseInt(m[1], 10)) }
+    ];
+    const prioritySels = [
+      '[class*="game-header"]', '[class*="board-header"]', '[class*="game-info"]',
+      '[class*="time-control"]', '[class*="time-select"]', '[class*="preset"]',
+      '[class*="component-timer"]', '[class*="timer"]', '[class*="clock"]'
+    ].join(',');
+    const seen = new Set();
     const texts = [];
-    queryAllInShadow(document, sel).forEach((el) => {
+    queryAllInShadow(document, prioritySels).forEach((el) => {
       const t = (el.innerText || el.textContent || '').trim();
-      if (t) texts.push(t);
+      if (t && !seen.has(t)) {
+        seen.add(t);
+        texts.push(t);
+      }
     });
-    if (document.body) texts.push(document.body.innerText);
     for (const t of texts) {
-      const m1 = t.match(/(\d+)\s*\|\s*(\d+)/);
+      for (const p of patterns) {
+        const m = t.match(p.re);
+        if (m) {
+          detectedTimeMin = p.parse(m);
+          debugLog('time control detected: ' + m[0] + ' (' + detectedTimeMin + ' min)');
+          return detectedTimeMin;
+        }
+      }
+    }
+    // Last resort: whole page text ("X | Y" first, then a plausible "X min").
+    if (document.body) {
+      const bodyText = document.body.innerText;
+      const m1 = bodyText.match(/(\d+)\s*\|\s*(\d+)/);
       if (m1) {
         detectedTimeMin = Math.max(1, parseInt(m1[1], 10) + parseInt(m1[2], 10) / 2);
-        debugLog('time control detected: ' + m1[1] + '|' + m1[2] + ' (' + detectedTimeMin + ' min)');
+        debugLog('time control detected (page): ' + m1[0] + ' (' + detectedTimeMin + ' min)');
         return detectedTimeMin;
       }
-      const m2 = t.match(/(\d+)\s*min\b/i);
+      const m2 = bodyText.match(/(\d+)\s*min\b/i);
       if (m2) {
-        detectedTimeMin = Math.max(1, parseInt(m2[1], 10));
-        debugLog('time control detected: ' + m2[1] + ' min');
-        return detectedTimeMin;
+        const min = parseInt(m2[1], 10);
+        if (min >= 1 && min <= 180) {
+          detectedTimeMin = min;
+          debugLog('time control detected (page): ' + m2[1] + ' min');
+          return detectedTimeMin;
+        }
       }
     }
     return null;
@@ -511,6 +579,12 @@
       if (getFenFromDom() !== fen) return;
       if (retryCount >= 3) {
         retryCount = 0;
+        if (settings.autoPlay && isMyTurn()) {
+          debugLog('engine unresponsive, resetting engine and retrying');
+          chrome.runtime.sendMessage({ action: 'chessmate-engine-reset' });
+          chrome.runtime.sendMessage(payload);
+          scheduleRetry(id, fen, payload);
+        }
         return;
       }
       retryCount++;
@@ -1127,6 +1201,12 @@
     const range = adaptiveDelayRange();
     const lo = range[0];
     const hi = range[1];
+    // Clock pressure always applies: never lose on time, whatever the settings.
+    const clockMs = readClockMs();
+    if (clockMs !== null) {
+      if (clockMs < 10000) return rand(0.5, 1.5);
+      if (clockMs < 30000) return rand(1, 2.5);
+    }
     if (!settings.naturalThink) return rand(lo, hi);
     if (!gameMood) gameMood = sampleMood(lo, hi);
     let d = gameMood * rand(0.8, 1.2);
@@ -1135,11 +1215,6 @@
       if (gap >= 150) d *= 0.3;
       else if (gap <= 25) d *= 1.6;
       else if (gap <= 60) d *= 1.15;
-    }
-    const clockMs = readClockMs();
-    if (clockMs !== null) {
-      if (clockMs < 10000) return rand(0.5, 1.5);
-      if (clockMs < 30000) return rand(1, 2.5);
     }
     return Math.min(hi, Math.max(lo, d));
   }
@@ -1185,7 +1260,7 @@
       debugLog('auto-play cancelled: position changed');
       return;
     }
-    if (fenSideToMove(fen) !== (isBoardFlipped() ? 'b' : 'w')) {
+    if (!isMyTurn()) {
       debugLog('auto-play cancelled: not my turn');
       return;
     }
@@ -1193,6 +1268,36 @@
     if (!move || move.length < 4) return;
     debugLog('auto-play: ' + move);
     playMoveByClicks(move);
+    verifyMovePlayed(s, move);
+  }
+
+  // If the move did not register on the board (missed click, animation, modal),
+  // retry the click, then re-analyze instead of stalling forever.
+  function verifyMovePlayed(s, move) {
+    let attempts = 0;
+    const check = () => {
+      if (!settings.autoPlay) return;
+      if (clickPlayActive) {
+        setTimeout(check, 800);
+        return;
+      }
+      const fen = getFenFromDom();
+      if (!fen || fen !== s.fen) return; // move registered
+      if (isGameOver()) return;
+      if (!isMyTurn()) return;
+      if (attempts >= 2) {
+        attempts = 0;
+        debugLog('auto-play: move ' + move + ' did not register, re-analyzing');
+        currentFen = null;
+        update();
+        return;
+      }
+      attempts++;
+      debugLog('auto-play: move ' + move + ' did not register, retrying click');
+      playMoveByClicks(move);
+      setTimeout(check, 4000);
+    };
+    setTimeout(check, 4000);
   }
 
   function clickPromotion(piece) {
@@ -1203,7 +1308,11 @@
       const cls = typeof el.className === 'string' ? el.className : '';
       const dp = el.getAttribute && el.getAttribute('data-piece');
       return cls.indexOf(piece) >= 0 || (dp && dp.toLowerCase().indexOf(piece) >= 0);
-    }) || els[0];
+    });
+    if (!target) {
+      debugLog('auto-play promotion: piece ' + piece + ' not found among ' + els.length + ' candidates, aborting');
+      return;
+    }
     debugLog('auto-play promotion: piece=' + piece + ' found=' + els.length + ' target=' + (!!target));
     if (!target) return;
     const r = target.getBoundingClientRect();
@@ -1247,14 +1356,17 @@
     return true;
   }
 
-  function findElByText(re, sel) {
-    const els = queryAllInShadow(document, sel);
-    for (const el of els) {
-      try {
-        if (el.getBoundingClientRect().width <= 0) continue;
-      } catch (e) {}
-      const t = (el.innerText || el.textContent || '').trim();
-      if (re.test(t)) return el;
+  function findElByText(re, sel, scopeSel) {
+    const scopes = scopeSel ? queryAllInShadow(document, scopeSel) : [document];
+    for (const scope of scopes) {
+      const els = queryAllInShadow(scope, sel);
+      for (const el of els) {
+        try {
+          if (el.getBoundingClientRect().width <= 0) continue;
+        } catch (e) {}
+        const t = (el.innerText || el.textContent || '').trim();
+        if (re.test(t)) return el;
+      }
     }
     return null;
   }
@@ -1309,7 +1421,10 @@
         humanClickEl(card);
       }
       setTimeout(() => {
-        const play = findElByText(/^\s*play\s*$/i, 'button');
+        // Prefer the Play button inside the new-game/lobby area, fall back to any.
+        const play = findElByText(/^\s*play\s*$/i, 'button',
+          '[class*="modal"], [class*="dialog"], [class*="lobby"], [class*="game-setup"], [class*="new-game"], [class*="match"], [class*="hero"]') ||
+          findElByText(/^\s*play\s*$/i, 'button');
         if (play) {
           debugLog('auto-next: play clicked');
           humanClickEl(play);
@@ -1374,7 +1489,9 @@
       doLobbyQueue,
       handleAutoQueueIntent,
       maybeStartNextGame,
-      resetMood: () => { gameMood = null; }
+      resetMood: () => { gameMood = null; },
+      getSettings: () => ({ ...settings }),
+      sanitizeSettings
     };
   }
 })();

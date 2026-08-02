@@ -1,25 +1,42 @@
 const $ = (id) => document.getElementById(id);
+const SETTINGS_KEY = 'chessmateSettings';
 const KEYS = ['enabled', 'mode', 'depth', 'movetime', 'liveMovetime', 'liveOnlyOwnTurn', 'showEval', 'hideMode', 'delayMin', 'delayMax', 'autoPlay', 'speed', 'autoPlaySecondChance', 'naturalThink', 'idleMouse', 'autoNextGame', 'autoNextTime'];
+const DEFAULTS = {
+  enabled: true, mode: 'both', depth: 18, movetime: 2500, liveMovetime: 2000,
+  liveOnlyOwnTurn: true, showEval: true, hideMode: 'always', delayMin: 0, delayMax: 0,
+  autoPlay: false, speed: 'auto', autoPlaySecondChance: 10, naturalThink: true,
+  idleMouse: true, autoNextGame: false, autoNextTime: '10'
+};
 let loaded = null;
 
-// Local storage is the source of truth (settings survive extension reloads).
-// Sync is only a fallback/mirror.
+// The whole settings object lives under one key: atomic read/write, so no
+// partial overwrites and no lost keys. Old flat keys are migrated into it.
 function readStore(cb) {
-  chrome.storage.local.get(Object.fromEntries(KEYS.map((k) => [k, undefined])), (loc) => {
+  chrome.storage.local.get(null, (loc) => {
+    loc = loc || {};
     if (chrome.runtime.lastError) loc = {};
-    if (loc && Object.keys(loc).length > 0) { cb(loc || {}); return; }
-    chrome.storage.sync.get(Object.fromEntries(KEYS.map((k) => [k, undefined])), (syn) => {
-      cb(chrome.runtime.lastError ? {} : (syn || {}));
+    if (loc[SETTINGS_KEY] && typeof loc[SETTINGS_KEY] === 'object') { cb(loc[SETTINGS_KEY]); return; }
+    const flat = {};
+    for (const k of KEYS) if (loc[k] !== undefined) flat[k] = loc[k];
+    if (Object.keys(flat).length > 0) {
+      writeStore(flat);
+      cb(flat);
+      return;
+    }
+    chrome.storage.sync.get(null, (syn) => {
+      const s = (syn || {})[SETTINGS_KEY];
+      cb((s && typeof s === 'object') ? s : {});
     });
   });
 }
 
 function writeStore(data, cb) {
-  chrome.storage.local.set(data, () => {
+  const full = { ...DEFAULTS, ...(loaded || {}), ...data };
+  chrome.storage.local.set({ [SETTINGS_KEY]: full }, () => {
     if (chrome.runtime.lastError) console.warn('[ChessMate] local save failed:', chrome.runtime.lastError);
     if (cb) cb();
   });
-  chrome.storage.sync.set(data, () => {
+  chrome.storage.sync.set({ [SETTINGS_KEY]: full }, () => {
     if (chrome.runtime.lastError) console.warn('[ChessMate] sync save failed:', chrome.runtime.lastError);
   });
 }
@@ -27,9 +44,8 @@ function writeStore(data, cb) {
 // Keep our view of storage fresh so we never overwrite newer values.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (!loaded || (area !== 'local' && area !== 'sync')) return;
-  for (const k of Object.keys(changes)) {
-    if (changes[k].newValue === undefined) delete loaded[k];
-    else loaded[k] = changes[k].newValue;
+  if (changes[SETTINGS_KEY] && changes[SETTINGS_KEY].newValue) {
+    loaded = changes[SETTINGS_KEY].newValue;
   }
 });
 

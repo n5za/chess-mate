@@ -79,6 +79,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.action === 'chessmate-engine-reset') {
+    ensureOffscreen()
+      .then((ok) => {
+        if (!ok) {
+          console.error('[ChessMate] offscreen not available');
+          sendResponse({ ok: false });
+          return;
+        }
+        chrome.runtime.sendMessage({ action: 'chessmate-engine-reset' });
+        sendResponse({ ok: true });
+      })
+      .catch((err) => {
+        console.error('[ChessMate] engine reset failed:', err);
+        sendResponse({ ok: false, error: String(err) });
+      });
+    return true;
+  }
+
   if (msg.action === 'chessmate-bestmove') {
     const tabId = pendingTabs.get(msg.requestId);
     if (tabId === undefined) return false;

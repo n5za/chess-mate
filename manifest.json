@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChessMate - Best Move",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Shows the best move on chess.com using local Stockfish. For analysis and learning purposes.",
   "permissions": [
     "storage",
