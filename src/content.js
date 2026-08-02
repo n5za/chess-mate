@@ -58,6 +58,8 @@
   let queueCardClicks = 0;
   let queueCardClickedAt = 0;
   let queuePlayClicked = false;
+  let nextGameBusy = false;
+  let nextGameBusyAt = 0;
 
   function isMyTurn() {
     const fen = getFenFromDom();
@@ -1391,22 +1393,38 @@
 
   function maybeStartNextGame() {
     if (!settings.autoNextGame || autoNextTimer) return;
+    if (nextGameBusy && Date.now() - nextGameBusyAt < 90000) return;
     autoNextTimer = setTimeout(() => {
       autoNextTimer = null;
       doStartNextGame();
     }, rand(2500, 5000));
   }
 
+  // One-shot guard: after the first "next game" action (rematch click or
+  // queueing), do nothing until a live game actually starts (or 90s pass),
+  // so the game-over screen can't re-trigger clicking every few seconds.
+  function armNextGame() {
+    if (nextGameBusy) return false;
+    nextGameBusy = true;
+    nextGameBusyAt = Date.now();
+    return true;
+  }
+
   function doStartNextGame() {
     if (!settings.autoNextGame || !isGameOver()) return;
+    if (nextGameBusy && Date.now() - nextGameBusyAt < 90000) return;
     const rematch = findElByText(/play again|rematch/i, 'button, [role="button"], [class*="game-over"] button');
     if (rematch) {
+      if (!armNextGame()) return;
       debugLog('auto-next: rematch clicked');
       humanClickEl(rematch);
       return;
     }
+    if (!armNextGame()) return;
     debugLog('auto-next: no rematch, queueing a new game');
     queueCardClicks = 0;
+    queueCardClickedAt = 0;
+    queuePlayClicked = false;
     setAutoQueue();
     if (isLobby()) {
       doLobbyQueue();
@@ -1482,6 +1500,7 @@
       if (isLiveView()) {
         queueCardClicks = 0;
         queuePlayClicked = false;
+        nextGameBusy = false;
         if (isGameOver()) maybeStartNextGame();
         else clearAutoQueue();
       }

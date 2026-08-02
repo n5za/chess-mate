@@ -203,6 +203,45 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
     return { ok: s.depth === 18 && s.enabled === true && s.speed === 'auto' && s.mode === 'both' };
   });
 
+  // 14. auto-next one-shot guard: while the game-over screen lingers, repeated
+  // doStartNextGame calls must not re-click (no endless re-queue loop)
+  await test('auto-next: one-shot guard, no re-arm while game-over lingers', () => {
+    window.__clicks = [];
+    document.addEventListener('click', (e) => {
+      if (e.target && e.target.__marker) window.__clicks.push(e.target.__marker);
+    }, true);
+    const go = document.createElement('div');
+    go.className = 'game-over-modal';
+    const lobby = document.createElement('div');
+    lobby.className = 'lobby-container';
+    const card = document.createElement('button');
+    card.className = 'time-control';
+    card.textContent = '10 min';
+    card.style.cssText = 'position:fixed;left:100px;top:100px;width:60px;height:30px';
+    card.__marker = 'card';
+    const play = document.createElement('button');
+    play.textContent = 'Play';
+    play.style.cssText = 'position:fixed;left:200px;top:200px;width:60px;height:30px';
+    play.__marker = 'play';
+    lobby.appendChild(card);
+    lobby.appendChild(play);
+    document.body.appendChild(go);
+    document.body.appendChild(lobby);
+  }, () => new Promise((resolve) => {
+    window.__chessmate.doStartNextGame();
+    window.__chessmate.doStartNextGame();
+    window.__chessmate.doStartNextGame();
+    window.__chessmate.doStartNextGame();
+    setTimeout(() => {
+      const clicks = window.__clicks;
+      resolve({
+        ok: clicks.filter((c) => c === 'card').length === 1 &&
+          clicks.filter((c) => c === 'play').length === 1,
+        detail: { clicks }
+      });
+    }, 5000);
+  }), { chessmateSettings: { autoNextGame: true, autoNextTime: '10' } });
+
   // 13. auto-next lobby queue: the time card is clicked at most once even when
   // doLobbyQueue is re-entered repeatedly, then Play once, no spam
   await test('lobby queue: 10 min card clicked once, not spammed on re-entry', () => {
