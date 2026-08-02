@@ -2,10 +2,10 @@ const $ = (id) => document.getElementById(id);
 const SETTINGS_KEY = 'chessmateSettings';
 const KEYS = ['enabled', 'mode', 'depth', 'movetime', 'liveMovetime', 'liveOnlyOwnTurn', 'showEval', 'hideMode', 'delayMin', 'delayMax', 'autoPlay', 'speed', 'autoPlaySecondChance', 'naturalThink', 'idleMouse', 'autoNextGame', 'autoNextTime'];
 const DEFAULTS = {
-  enabled: true, mode: 'both', depth: 18, movetime: 2500, liveMovetime: 2000,
+  enabled: true, mode: 'both', depth: 22, movetime: 3000, liveMovetime: 3000,
   liveOnlyOwnTurn: true, showEval: true, hideMode: 'always', delayMin: 0, delayMax: 0,
   autoPlay: false, speed: 'auto', autoPlaySecondChance: 10, naturalThink: true,
-  idleMouse: true, autoNextGame: false, autoNextTime: '10'
+  idleMouse: false, autoNextGame: false, autoNextTime: '10'
 };
 let loaded = null;
 
@@ -54,9 +54,9 @@ readStore((storeData) => {
   const st = loaded;
   $('enabled').checked = st.enabled !== false;
   $('mode').value = st.mode || 'both';
-  $('depth').value = st.depth ?? 18;
-  $('movetime').value = st.movetime ?? 2500;
-  $('liveMovetime').value = st.liveMovetime ?? 2000;
+  $('depth').value = st.depth ?? 22;
+  $('movetime').value = st.movetime ?? 3000;
+  $('liveMovetime').value = st.liveMovetime ?? 3000;
   $('liveOnlyOwnTurn').checked = st.liveOnlyOwnTurn !== false;
   $('showEval').checked = st.showEval !== false;
   $('hideMode').value = st.hideMode || 'always';

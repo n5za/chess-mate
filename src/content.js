@@ -6,9 +6,9 @@
   const DEFAULTS = {
     enabled: true,
     mode: 'both',        // 'both' | 'live' | 'analysis'
-    depth: 18,
-    movetime: 2500,
-    liveMovetime: 2000,
+    depth: 22,           // deep enough for ~2500-strength play
+    movetime: 3000,
+    liveMovetime: 3000,
     liveOnlyOwnTurn: true,
     showEval: true,
     hideMode: 'always',  // 'always' | 'alt' | 'hover'
@@ -20,7 +20,7 @@
     speed: 'auto',       // auto: adapt to the game's time control; slow/normal/fast: scale it
     autoPlaySecondChance: 10, // % chance to play the 2nd-best move
     naturalThink: true,  // human think-time model (mood, complexity, clock pressure)
-    idleMouse: true,     // subtle idle mouse movement while waiting
+    idleMouse: false,    // subtle idle mouse movement while waiting (off: cursor stays still)
     autoNextGame: false, // after a game ends, start the next one automatically
     autoNextTime: '10',  // time control (minutes) for the next game
     debug: false         // console logs (turn on from the console to debug)
@@ -77,6 +77,17 @@
     v = parseFloat(v);
     return isNaN(v) ? d : Math.min(hi, Math.max(lo, v));
   }
+  // One-time strength upgrade: settings saved by older versions are bumped to
+  // the strong defaults (2500-strength play) instead of keeping shallow search.
+  function migrateStrength(stored) {
+    if (stored.settingsVersion >= 2) return { settings: stored, changed: false };
+    const next = { ...stored };
+    let changed = false;
+    if ((next.depth ?? DEFAULTS.depth) < 20) { next.depth = DEFAULTS.depth; changed = true; }
+    if ((next.liveMovetime ?? DEFAULTS.liveMovetime) < 2500) { next.liveMovetime = DEFAULTS.liveMovetime; changed = true; }
+    next.settingsVersion = 2;
+    return { settings: next, changed };
+  }
   function sanitizeSettings(s) {
     const out = { ...DEFAULTS, ...(s || {}) };
     out.depth = clampInt(out.depth, 1, 30, DEFAULTS.depth);
@@ -95,6 +106,7 @@
     chrome.storage.local.get(null, (loc) => {
       loc = loc || {};
       let stored = null;
+      let dirty = false;
       if (loc[SETTINGS_KEY] && typeof loc[SETTINGS_KEY] === 'object') {
         stored = loc[SETTINGS_KEY];
       } else {
@@ -102,9 +114,13 @@
         for (const k of Object.keys(DEFAULTS)) {
           if (loc[k] !== undefined) stored[k] = loc[k];
         }
-        if (Object.keys(stored).length > 0) {
-          chrome.storage.local.set({ [SETTINGS_KEY]: stored });
-        }
+        dirty = Object.keys(stored).length > 0;
+      }
+      const mig = migrateStrength(stored);
+      stored = mig.settings;
+      if (mig.changed) dirty = true;
+      if (dirty) {
+        chrome.storage.local.set({ [SETTINGS_KEY]: stored });
       }
       settings = sanitizeSettings(stored);
       if (cb) cb();
@@ -512,7 +528,7 @@
     if (minutes === null) return settings.liveMovetime;
     if (minutes <= 1) return Math.min(settings.liveMovetime, 800);
     if (minutes <= 3) return Math.min(settings.liveMovetime, 1500);
-    if (minutes <= 5) return Math.min(settings.liveMovetime, 2000);
+    if (minutes <= 5) return Math.min(settings.liveMovetime, 2500);
     return settings.liveMovetime;
   }
 
@@ -1385,8 +1401,6 @@
   }
 
   function clearAutoQueue() {
-    queueCardClicks = 0;
-    queueCardClickedAt = 0;
     queuePlayClicked = false;
     chrome.storage.local.remove('chessmateAutoQueue');
   }

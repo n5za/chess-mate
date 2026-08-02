@@ -34,7 +34,7 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
               cb(out);
             },
             set: (o, cb) => { Object.assign(window.__store, o); if (cb) cb(); },
-            remove: (k, cb) => { if (cb) cb(); }
+            remove: (k, cb) => { delete window.__store[k]; if (cb) cb(); }
           },
           sync: { get: (d, cb) => cb({}), set: (o, cb) => { if (cb) cb(); }, remove: (k, cb) => { if (cb) cb(); } },
           onChanged: { addListener: () => {} }
@@ -155,7 +155,7 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
     };
     const results = {};
     const expectations = { 1: [1, 2], 3: [1.5, 4], 5: [2, 7], 10: [3, 15] };
-    const caps = { 1: 800, 3: 1500, 5: 2000, 10: null };
+    const caps = { 1: 800, 3: 1500, 5: 2500, 10: null };
     for (const [min, exp] of Object.entries(expectations)) {
       setControl(min + ' min');
       const r = window.__chessmate.adaptiveDelayRange();
@@ -197,18 +197,27 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
       window.__chessmate.getSettings().autoPlaySecondChance === 25
   }), { chessmateSettings: { autoPlay: true, depth: 999, delayMax: -3, autoPlaySecondChance: 25 } });
 
-  // 12. settings: empty storage falls back to defaults
+  // 12. settings: empty storage falls back to defaults (strong defaults: 2500-level)
   await test('settings: empty storage -> defaults', null, () => {
     const s = window.__chessmate.getSettings();
-    return { ok: s.depth === 18 && s.enabled === true && s.speed === 'auto' && s.mode === 'both' };
+    return { ok: s.depth === 22 && s.enabled === true && s.speed === 'auto' && s.mode === 'both' && s.idleMouse === false };
   });
+
+  // 12b. settings: old weak settings are bumped once to the strong defaults
+  await test('settings: one-time strength migration (depth 10 -> 22, live 500 -> 3000)', null, () => {
+    const s = window.__chessmate.getSettings();
+    return {
+      ok: s.depth === 22 && s.liveMovetime === 3000 && window.__store.chessmateSettings.settingsVersion === 2,
+      detail: { s, stored: window.__store.chessmateSettings }
+    };
+  }, { chessmateSettings: { autoPlay: true, depth: 10, liveMovetime: 500 } });
 
   // 14. auto-next one-shot guard: while the game-over screen lingers, repeated
   // doStartNextGame calls must not re-click (no endless re-queue loop)
   await test('auto-next: one-shot guard, no re-arm while game-over lingers', () => {
     window.__clicks = [];
     document.addEventListener('click', (e) => {
-      if (e.target && e.target.__marker) window.__clicks.push(e.target.__marker);
+      if (e.target && e.target.__marker) window.__clicks.push({ m: e.target.__marker, t: Math.round(performance.now()) });
     }, true);
     const go = document.createElement('div');
     go.className = 'game-over-modal';
@@ -235,8 +244,8 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
     setTimeout(() => {
       const clicks = window.__clicks;
       resolve({
-        ok: clicks.filter((c) => c === 'card').length === 1 &&
-          clicks.filter((c) => c === 'play').length === 1,
+        ok: clicks.filter((c) => c.m === "card").length === 1 &&
+          clicks.filter((c) => c.m === "play").length === 1,
         detail: { clicks }
       });
     }, 5000);
@@ -248,7 +257,7 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
     window.__clicks = [];
     document.addEventListener('click', (e) => {
       const el = e.target;
-      if (el && el.__marker) window.__clicks.push(el.__marker);
+      if (el && el.__marker) window.__clicks.push({ m: el.__marker, t: Math.round(performance.now()) });
     }, true);
     const lobby = document.createElement('div');
     lobby.className = 'lobby-container';
@@ -278,8 +287,8 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
     window.__chessmate.doLobbyQueue();
     setTimeout(() => {
       const clicks = window.__clicks;
-      const cardClicks = clicks.filter((c) => c === 'card').length;
-      const playClicks = clicks.filter((c) => c === 'play').length;
+      const cardClicks = clicks.filter((c) => c.m === "card").length;
+      const playClicks = clicks.filter((c) => c.m === "play").length;
       resolve({
         ok: cardClicks === 1 && playClicks === 1,
         detail: { clicks }
