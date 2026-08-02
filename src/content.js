@@ -55,6 +55,9 @@
   let gameOverRetries = 0;
   let autoNextTimer = null;
   let detectedTimeMin = null;
+  let queueCardClicks = 0;
+  let queueCardClickedAt = 0;
+  let queuePlayClicked = false;
 
   function isMyTurn() {
     const fen = getFenFromDom();
@@ -1356,10 +1359,10 @@
     return true;
   }
 
-  function findElByText(re, sel, scopeSel) {
-    const scopes = scopeSel ? queryAllInShadow(document, scopeSel) : [document];
-    for (const scope of scopes) {
-      const els = queryAllInShadow(scope, sel);
+  function findElByText(re, sel, scopeSel, within) {
+    const roots = within ? [within] : (scopeSel ? queryAllInShadow(document, scopeSel) : [document]);
+    for (const root of roots) {
+      const els = queryAllInShadow(root, sel);
       for (const el of els) {
         try {
           if (el.getBoundingClientRect().width <= 0) continue;
@@ -1380,6 +1383,9 @@
   }
 
   function clearAutoQueue() {
+    queueCardClicks = 0;
+    queueCardClickedAt = 0;
+    queuePlayClicked = false;
     chrome.storage.local.remove('chessmateAutoQueue');
   }
 
@@ -1400,6 +1406,7 @@
       return;
     }
     debugLog('auto-next: no rematch, queueing a new game');
+    queueCardClicks = 0;
     setAutoQueue();
     if (isLobby()) {
       doLobbyQueue();
@@ -1408,35 +1415,61 @@
     }
   }
 
+  // A card is "selected" when chess.com marks it active. Only click a card
+  // when it isn't selected, at most twice per queue session, so the mouse
+  // never spams the same button while the page is slow.
+  function isActiveEl(el) {
+    const cls = typeof el.className === 'string' ? el.className : '';
+    return /active|selected|checked/i.test(cls) ||
+      el.getAttribute('aria-selected') === 'true' ||
+      el.getAttribute('aria-pressed') === 'true';
+  }
+
   function doLobbyQueue() {
     const time = String(settings.autoNextTime || '10');
-    let attempts = 0;
     const safe = time.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const tryPlay = () => {
+    const findCard = () => findElByText(new RegExp('^\\s*' + safe + '\\s*min', 'i'),
+      'button, [role="button"], [class*="preset"], [class*="time-control"], [class*="time-select"]');
+    const findPlay = () => {
+      const scopes = queryAllInShadow(document,
+        '[class*="modal"], [class*="dialog"], [class*="new-game"], [class*="game-setup"], [class*="lobby"], [class*="match"], [class*="create-challenge"], main');
+      for (const scope of scopes) {
+        const nav = scope.closest && scope.closest('nav, header, [class*="navigation"], [class*="header"], [class*="menu"]');
+        if (nav) continue;
+        const btn = findElByText(/^\s*play\s*$/i, 'button, [role="button"]', null, scope);
+        if (btn) return btn;
+      }
+      return null;
+    };
+    const tryPlay = (attempt) => {
       if (!settings.autoNextGame) return clearAutoQueue();
-      const card = findElByText(new RegExp('^\\s*' + safe + '\\s*min', 'i'),
-        'button, [role="button"], [class*="preset"], [class*="time-control"], [class*="time-select"]');
-      if (card) {
-        debugLog('auto-next: time control ' + time + ' min clicked');
-        humanClickEl(card);
+      if (queuePlayClicked) return;
+      const card = findCard();
+      if (card && !isActiveEl(card)) {
+        if (queueCardClicks < 2 && Date.now() - queueCardClickedAt > 5000) {
+          queueCardClicks++;
+          queueCardClickedAt = Date.now();
+          debugLog('auto-next: time control ' + time + ' min clicked');
+          humanClickEl(card);
+        }
+      } else if (card) {
+        queueCardClicks = 2;
       }
       setTimeout(() => {
-        // Prefer the Play button inside the new-game/lobby area, fall back to any.
-        const play = findElByText(/^\s*play\s*$/i, 'button',
-          '[class*="modal"], [class*="dialog"], [class*="lobby"], [class*="game-setup"], [class*="new-game"], [class*="match"], [class*="hero"]') ||
-          findElByText(/^\s*play\s*$/i, 'button');
+        if (queuePlayClicked) return;
+        const play = findPlay();
         if (play) {
+          queuePlayClicked = true;
           debugLog('auto-next: play clicked');
           humanClickEl(play);
-          setTimeout(clearAutoQueue, 3000);
+          setTimeout(() => { queueCardClicks = 0; queuePlayClicked = false; clearAutoQueue(); }, 3000);
           return;
         }
-        attempts++;
-        if (attempts < 6) setTimeout(tryPlay, 2000);
+        if (attempt < 3) setTimeout(() => tryPlay(attempt + 1), 2500);
         else clearAutoQueue();
       }, rand(500, 1100));
     };
-    tryPlay();
+    tryPlay(0);
   }
 
   function handleAutoQueueIntent() {
@@ -1447,6 +1480,8 @@
       if (Date.now() - q.ts > 120000) return clearAutoQueue();
       if (isLobby()) return doLobbyQueue();
       if (isLiveView()) {
+        queueCardClicks = 0;
+        queuePlayClicked = false;
         if (isGameOver()) maybeStartNextGame();
         else clearAutoQueue();
       }

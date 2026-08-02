@@ -203,6 +203,51 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
     return { ok: s.depth === 18 && s.enabled === true && s.speed === 'auto' && s.mode === 'both' };
   });
 
+  // 13. auto-next lobby queue: the time card is clicked at most once even when
+  // doLobbyQueue is re-entered repeatedly, then Play once, no spam
+  await test('lobby queue: 10 min card clicked once, not spammed on re-entry', () => {
+    window.__clicks = [];
+    document.addEventListener('click', (e) => {
+      const el = e.target;
+      if (el && el.__marker) window.__clicks.push(el.__marker);
+    }, true);
+    const lobby = document.createElement('div');
+    lobby.className = 'lobby-container';
+    const card = document.createElement('button');
+    card.className = 'time-control';
+    card.textContent = '10 min';
+    card.style.position = 'fixed';
+    card.style.left = '100px';
+    card.style.top = '100px';
+    card.style.width = '60px';
+    card.style.height = '30px';
+    card.__marker = 'card';
+    const play = document.createElement('button');
+    play.textContent = 'Play';
+    play.style.position = 'fixed';
+    play.style.left = '200px';
+    play.style.top = '200px';
+    play.style.width = '60px';
+    play.style.height = '30px';
+    play.__marker = 'play';
+    lobby.appendChild(card);
+    lobby.appendChild(play);
+    document.body.appendChild(lobby);
+  }, () => new Promise((resolve) => {
+    window.__chessmate.doLobbyQueue();
+    window.__chessmate.doLobbyQueue();
+    window.__chessmate.doLobbyQueue();
+    setTimeout(() => {
+      const clicks = window.__clicks;
+      const cardClicks = clicks.filter((c) => c === 'card').length;
+      const playClicks = clicks.filter((c) => c === 'play').length;
+      resolve({
+        ok: cardClicks === 1 && playClicks === 1,
+        detail: { clicks }
+      });
+    }, 4500);
+  }), { chessmateSettings: { autoNextGame: true, autoNextTime: '10' }, chessmateAutoQueue: { time: '10', ts: Date.now() } });
+
   const passCount = results.filter(Boolean).length;
   console.log('\n==== CONTENT RESULT: ' + passCount + ' passed, ' + (results.length - passCount) + ' failed ====');
   await browser.close();
