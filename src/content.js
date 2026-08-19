@@ -1,7 +1,8 @@
 (() => {
   'use strict';
 
-  const SITE = /lichess\.org/.test(location.hostname) ? 'lichess' : 'chesscom';
+  // Test hook (tests override the site), then real hostname detection.
+  const SITE = window.__CHESSMATE_SITE__ || (/lichess\.org/.test(location.hostname) ? 'lichess' : 'chesscom');
   const ROLE_FIRST = { king: 'k', queen: 'q', rook: 'r', bishop: 'b', knight: 'n', pawn: 'p' };
 
   const OVERLAY_ID = 'chessmate-overlay';
@@ -63,11 +64,18 @@
   let queuePlayClicked = false;
   let nextGameBusy = false;
   let nextGameBusyAt = 0;
+  let externalState = null; // lichess main-world bridge: { fen, myColor, gameOver, ts }
+
+  function myColor() {
+    const ext = externalState;
+    if (ext && ext.myColor && Date.now() - ext.ts < 5000) return ext.myColor;
+    return isBoardFlipped() ? 'b' : 'w';
+  }
 
   function isMyTurn() {
     const fen = getFenFromDom();
     if (!fen) return false;
-    return fenSideToMove(fen) === (isBoardFlipped() ? 'b' : 'w');
+    return fenSideToMove(fen) === myColor();
   }
 
   // Settings: one atomic key in local storage so nothing can be half-written
@@ -143,6 +151,26 @@
       if (!(k in DEFAULTS)) continue;
       settings[k] = changes[k].newValue === undefined ? DEFAULTS[k] : changes[k].newValue;
       if (k === 'autoPlay' && changes[k].newValue) gameMood = null;
+    }
+  });
+
+  // ── Lichess main-world bridge ─────────────────────────
+  // inject.js (world: MAIN) reads lichess's own controllers and posts the
+  // exact FEN / my color / game-over state here — instant and accurate.
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.source !== 'chessmate-inject' || d.type !== 'chessmate:state') return;
+    const state = {
+      fen: d.fen && isValidFen(d.fen) ? d.fen : null,
+      myColor: d.myColor === 'b' || d.myColor === 'w' ? d.myColor : null,
+      gameOver: typeof d.gameOver === 'boolean' ? d.gameOver : null,
+      ts: Date.now()
+    };
+    const fenChanged = (externalState ? externalState.fen : null) !== state.fen;
+    externalState = state;
+    if (fenChanged) {
+      currentFen = null;
+      update();
     }
   });
 
@@ -323,8 +351,13 @@
   }
 
   function getLichessFen() {
+    // 1) exact FEN from the main-world bridge (round/analysis/puzzle state)
+    const ext = externalState;
+    if (ext && ext.fen && Date.now() - ext.ts < 5000) return ext.fen;
+    // 2) FEN in the /analysis/<FEN> URL
     const urlFen = lichessFenFromUrl();
     if (urlFen) return urlFen;
+    // 3) rebuild from chessground piece DOM
     return lichessFenFromPieces();
   }
 
@@ -499,14 +532,17 @@
 
   function detectTurn() {
     if (SITE === 'lichess') {
-      // lichess: the running clock tells whose turn it is (bottom = my side)
+      // lichess: bridge FEN already carries the exact side to move
+      const ext = externalState;
+      if (ext && ext.fen && Date.now() - ext.ts < 5000) return fenSideToMove(ext.fen);
+      // running clock tells whose turn it is (bottom = my side)
       const running = document.querySelector('.clock.clock-running, [class*="clock-running"]');
       if (running) {
-        const myColor = isBoardFlipped() ? 'b' : 'w';
+        const mc = myColor();
         if (running.classList.contains('clock-bottom') || running.classList.contains('clock-player-bottom') || running.id === 'clock_bottom') {
-          return myColor;
+          return mc;
         }
-        return myColor === 'w' ? 'b' : 'w';
+        return mc === 'w' ? 'b' : 'w';
       }
       return detectTurnFromMoveList();
     }
@@ -716,8 +752,7 @@
     if (settings.mode === 'live' && analysis) return false;
     if (settings.mode === 'analysis' && !analysis) return false;
     if (settings.liveOnlyOwnTurn && !analysis) {
-      const myColor = isBoardFlipped() ? 'b' : 'w';
-      if (fenSideToMove(fen) !== myColor) return false;
+      if (fenSideToMove(fen) !== myColor()) return false;
     }
     return true;
   }
@@ -745,12 +780,16 @@
       clearTimeout(retryTimer);
       retryTimer = null;
     }
-    const retryMs = settings.retryMs || 6000;
+    const retryMs = settings.retryMs || 2000;
     retryTimer = setTimeout(() => {
       retryTimer = null;
       if (id !== requestId) return;
+      if (document.hidden) {
+        scheduleRetry(id, fen, payload);
+        return;
+      }
       if (getFenFromDom() !== fen) return;
-      if (retryCount >= 3) {
+      if (retryCount >= 2) {
         retryCount = 0;
         if (settings.autoPlay && isMyTurn()) {
           debugLog('engine unresponsive, resetting engine and retrying');
@@ -983,6 +1022,7 @@
   }
 
   function update() {
+    if (document.hidden) return; // pause all work in background tabs
     boardEl = findBoardElement();
     if (!boardEl) {
       clearOverlay();
@@ -1026,6 +1066,8 @@
 
   function isGameOver() {
     if (SITE === 'lichess') {
+      const ext = externalState;
+      if (ext && ext.gameOver !== null && Date.now() - ext.ts < 5000) return ext.gameOver;
       return !!document.querySelector('.game-over, .game-ended, .tview2 .result, [class*="game-over"], [class*="game-ended"], .rematch');
     }
     return !!document.querySelector('.game-over-modal, .modal-game-over-component, .game-over-header-component, [class*="game-over"]');
@@ -1053,11 +1095,21 @@
 
     if (boardObserver) boardObserver.disconnect();
     boardObserver = new MutationObserver(scheduleUpdate);
-    boardObserver.observe(document.body, {
+    // Watch only the board area (not the whole page): piece/style/class and
+    // data-fen changes cover every move on both sites while keeping CPU low.
+    let obsTarget = root;
+    if (!root) {
+      obsTarget = document.body;
+    } else if (SITE === 'chesscom') {
+      obsTarget = root.closest('#board-layout-chessboard, .board-layout-main, [class*="board-layout"]') || root;
+    } else {
+      obsTarget = root.closest('.main-board, .round, .round__app, .analyse') || root;
+    }
+    boardObserver.observe(obsTarget, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['class', 'style']
+      attributeFilter: ['class', 'style', 'data-fen']
     });
 
     // shadow DOM board (live games): observe the shadow root as well
@@ -1685,11 +1737,15 @@
     setupStealthListeners();
     startWanderLoop();
     handleAutoQueueIntent();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) update();
+    });
     setInterval(() => {
+      if (document.hidden) return; // background tab: no work at all
       update();
       if (isGameOver()) maybeStartNextGame();
       handleAutoQueueIntent();
-    }, 4000);
+    }, 2500);
   }
 
   if (document.readyState === 'loading') {
@@ -1708,6 +1764,7 @@
       adaptiveDelayRange,
       engineTimeMs,
       resetTimeControl,
+      myColor,
       startWanderLoop,
       cancelWander,
       doWander,

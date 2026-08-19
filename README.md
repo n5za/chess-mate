@@ -36,12 +36,17 @@ offscreen.html + offscreen.js: runs Stockfish (Web Worker + WASM)
   attribute) → turn from running clock (`clock-player-turn`) or move list.
   Pieces are searched through **shadow DOM** too — live 1v1 games render
   the board inside a `chess-board` shadow root, bot games use light DOM.
-- **lichess FEN extraction**: `/analysis/<FEN>` URL (initial position) →
-  chessground piece DOM (`<piece data-role/data-color>` or `white king`
+- **lichess FEN extraction**: main-world bridge (`src/inject.js` reads
+  lichess's own round/analysis/puzzle/study state and posts the exact FEN,
+  your color and game-over flag) → `/analysis/<FEN>` URL (initial position)
+  → chessground piece DOM (`<piece data-role/data-color>` or `white king`
   classes + `transform: translate(x%, y%)` coordinates, orientation
   independent) → turn from the running clock (`clock-running` top/bottom)
   or the `.tview2` move list. Works on live games, analysis, studies and
   puzzles.
+- **Lightweight**: in background tabs the extension does zero work
+  (analysis pauses, retries wait); observers watch only the board area,
+  not the whole page; engine retries are faster and capped.
 - **Orientation**: `orientation` attribute → `flipped` class →
   `cg-wrap.orientation-black` (lichess) → geometric vote on piece positions
   (works even when `a1` is empty)
@@ -98,10 +103,13 @@ chessmate/
 ├── manifest.json              MV3 manifest
 ├── src/
 │   ├── content.js             FEN extraction + arrow overlay
+│   ├── inject.js              lichess main-world bridge (exact FEN/color/status)
 │   ├── background.js          Message router + offscreen lifecycle
 │   ├── offscreen.html/.js     Stockfish worker host
 │   ├── engine/                Stockfish 18 lite (GPLv3)
 │   └── popup/                 Settings UI
+├── tests/
+│   └── test-content.js        content-script logic tests (node test-content.js)
 ```
 
 ## Test
@@ -110,6 +118,5 @@ Engine + routing and content-script logic are covered by automated tests
 run against Chrome for Testing:
 
 ```
-node /tmp/opencode/test-e2e.js          # engine E2E (offscreen worker)
-node /tmp/opencode/domtest/test-content.js  # FEN + overlay logic
+cd tests && node test-content.js       # content-script logic (lichess + chess.com)
 ```

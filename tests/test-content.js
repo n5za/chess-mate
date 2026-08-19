@@ -15,7 +15,7 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
 
   const results = [];
 
-  async function test(name, bodyHtml, run, store) {
+  async function test(name, bodyHtml, run, store, pre) {
     const page = await browser.newPage();
     page.on('pageerror', (e) => console.log('  [pageerror]', String(e).slice(0, 200)));
     await page.goto('file://' + path.resolve(__dirname, 'harness.html'));
@@ -44,6 +44,7 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
     `;
     await page.evaluate(() => { window.__CHESSMATE_TEST__ = true; });
     await page.evaluate(chromeMock);
+    if (pre) await page.evaluate(pre);
     try {
       await page.evaluate(SRC);
     } catch (e) {
@@ -295,6 +296,135 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
       });
     }, 4500);
   }), { chessmateSettings: { autoNextGame: true, autoNextTime: '10' }, chessmateAutoQueue: { time: '10', ts: Date.now() } });
+
+  // 15. lichess: piece-DOM rebuild -> engine request with exact FEN (after 1.e4)
+  await test('lichess: FEN rebuilt from chessground pieces matches post-1.e4 position',
+    () => {
+      const main = document.createElement('div');
+      main.className = 'main-board';
+      main.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:400px';
+      const cg = document.createElement('cg-board');
+      main.appendChild(cg);
+      document.body.appendChild(main);
+      const piece = (role, color, x, y) => {
+        const p = document.createElement('piece');
+        p.setAttribute('data-role', role);
+        p.setAttribute('data-color', color);
+        p.setAttribute('style', `transform: translate(${x}%, ${y}%);`);
+        cg.appendChild(p);
+      };
+      for (let c = 0; c < 8; c++) {
+        piece('pawn', 'black', c * 100, 100);
+        if (c !== 4) piece('pawn', 'white', c * 100, 600); // e2 pawn moved to e4
+      }
+      piece('pawn', 'white', 400, 400); // e4
+      const back = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'];
+      back.forEach((r, c) => { piece(r, 'white', c * 100, 700); piece(r, 'black', c * 100, 0); });
+      const tview = document.createElement('div');
+      tview.className = 'tview2';
+      ['e4', 'e5'].forEach((s) => { const e = document.createElement('san'); e.textContent = s; tview.appendChild(e); });
+      document.body.appendChild(tview);
+    },
+    () => new Promise((resolve) => {
+      setTimeout(() => {
+        const msgs = window.__sent.filter((m) => m.action === 'chessmate-analyze');
+        const last = msgs[msgs.length - 1];
+        resolve({
+          ok: !!last && last.fen === 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1',
+          detail: last && last.fen
+        });
+      }, 800);
+    }),
+    null,
+    () => {
+      window.__CHESSMATE_SITE__ = 'lichess';
+    });
+
+  // 16. lichess: bridge message -> instant engine request with exact FEN (black to move)
+  await test('lichess: main-world bridge fen/myColor honored', () => {
+    const main = document.createElement('div');
+    main.className = 'main-board';
+    main.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:400px';
+    document.body.appendChild(main);
+  }, () => new Promise((resolve) => {
+    window.postMessage({
+      source: 'chessmate-inject',
+      type: 'chessmate:state',
+      fen: 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 0 3',
+      myColor: 'b',
+      gameOver: false
+    }, '*');
+    setTimeout(() => {
+      const msgs = window.__sent.filter((m) => m.action === 'chessmate-analyze');
+      const last = msgs[msgs.length - 1];
+      resolve({
+        ok: !!last && last.fen === 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 0 3' &&
+          window.__chessmate.myColor() === 'b',
+        detail: { fen: last && last.fen, myColor: window.__chessmate.myColor() }
+      });
+    }, 300);
+  }), null,
+    () => {
+      window.__CHESSMATE_SITE__ = 'lichess';
+    });
+
+  // 17. hidden tab: no engine work while hidden, one update when it becomes visible
+  await test('lichess: background tab does no analysis, catches up on visibilitychange', () => {
+    const main = document.createElement('div');
+    main.className = 'main-board';
+    main.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:400px';
+    const cg = document.createElement('cg-board');
+    main.appendChild(cg);
+    document.body.appendChild(main);
+    const piece = (role, color, x, y) => {
+      const p = document.createElement('piece');
+      p.setAttribute('data-role', role);
+      p.setAttribute('data-color', color);
+      p.setAttribute('style', `transform: translate(${x}%, ${y}%);`);
+      cg.appendChild(p);
+    };
+    for (let c = 0; c < 8; c++) {
+      piece('pawn', 'black', c * 100, 100);
+      piece('pawn', 'white', c * 100, 600);
+    }
+    piece('pawn', 'white', 400, 400);
+    const back = ['rook', 'knight', 'bishop', 'queen', 'king', 'bishop', 'knight', 'rook'];
+    back.forEach((r, c) => { piece(r, 'white', c * 100, 700); piece(r, 'black', c * 100, 0); });
+  }, () => new Promise((resolve) => {
+    setTimeout(() => {
+      const hiddenMsgs = window.__sent.filter((m) => m.action === 'chessmate-analyze');
+      Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      setTimeout(() => {
+        const visibleMsgs = window.__sent.filter((m) => m.action === 'chessmate-analyze');
+        resolve({
+          ok: hiddenMsgs.length === 0 && visibleMsgs.length > 0,
+          detail: { hidden: hiddenMsgs.length, visible: visibleMsgs.length }
+        });
+      }, 400);
+    }, 400);
+  }), null,
+    () => {
+      window.__CHESSMATE_SITE__ = 'lichess';
+      Object.defineProperty(document, 'hidden', { get: () => true, configurable: true });
+    });
+
+  // 18. chess.com: data-fen attribute change on the board triggers a new analysis
+  await test('chess.com: data-fen change on board element triggers update', () => {
+    const board = document.createElement('chess-board');
+    board.setAttribute('data-fen', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+    board.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:400px';
+    document.body.appendChild(board);
+  }, () => new Promise((resolve) => {
+    const fen2 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1';
+    setTimeout(() => {
+      document.querySelector('chess-board').setAttribute('data-fen', fen2);
+      setTimeout(() => {
+        const fens = window.__sent.filter((m) => m.action === 'chessmate-analyze').map((m) => m.fen);
+        resolve({ ok: fens[fens.length - 1] === fen2, detail: fens });
+      }, 700);
+    }, 900);
+  }));
 
   const passCount = results.filter(Boolean).length;
   console.log('\n==== CONTENT RESULT: ' + passCount + ' passed, ' + (results.length - passCount) + ' failed ====');
