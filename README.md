@@ -1,8 +1,9 @@
-# ChessMate — Best Move for chess.com
+# ChessMate — Best Move for chess.com and lichess.org
 src/img&videa/Pasted image.png
 Chrome/Edge extension (Manifest V3) that shows the best move on chess.com
-using local Stockfish. Works on live games and analysis. No internet needed
-for the engine — Stockfish runs entirely on your device.
+**and lichess.org** using local Stockfish. Works on live games, analysis,
+studies and puzzles. No internet needed for the engine — Stockfish runs
+entirely on your device.
 
 > Warning: using engine assistance in rated online play violates
 > chess.com Terms of Service and can get your account banned. This tool
@@ -17,12 +18,12 @@ for the engine — Stockfish runs entirely on your device.
 1. Open `chrome://extensions` (or `edge://extensions`)
 2. Enable **Developer mode** (top right)
 3. Click **Load unpacked** and select the `chessmate` folder
-4. Open chess.com — arrows appear automatically
+4. Open chess.com or lichess.org — arrows appear automatically
 
 ## How it works
 
 ```
-chess.com page
+chess.com / lichess.org page
     │  content.js: reads board FEN from DOM, draws arrow overlay
     ▼
 background.js: routes requests, keeps offscreen document alive
@@ -30,13 +31,20 @@ background.js: routes requests, keeps offscreen document alive
 offscreen.html + offscreen.js: runs Stockfish (Web Worker + WASM)
 ```
 
-- **FEN extraction**: `data-fen` attribute → web component `game` object →
-  piece DOM (`div.piece` with `square-NN` classes + `data-piece` attribute)
-  → turn from running clock (`clock-player-turn`) or move list. Pieces are
-  searched through **shadow DOM** too — live 1v1 games render the board
-  inside a `chess-board` shadow root, bot games use light DOM.
-- **Orientation**: `orientation` attribute → `flipped` class → geometric
-  vote on piece positions (works even when `a1` is empty)
+- **chess.com FEN extraction**: `data-fen` attribute → web component `game`
+  object → piece DOM (`div.piece` with `square-NN` classes + `data-piece`
+  attribute) → turn from running clock (`clock-player-turn`) or move list.
+  Pieces are searched through **shadow DOM** too — live 1v1 games render
+  the board inside a `chess-board` shadow root, bot games use light DOM.
+- **lichess FEN extraction**: `/analysis/<FEN>` URL (initial position) →
+  chessground piece DOM (`<piece data-role/data-color>` or `white king`
+  classes + `transform: translate(x%, y%)` coordinates, orientation
+  independent) → turn from the running clock (`clock-running` top/bottom)
+  or the `.tview2` move list. Works on live games, analysis, studies and
+  puzzles.
+- **Orientation**: `orientation` attribute → `flipped` class →
+  `cg-wrap.orientation-black` (lichess) → geometric vote on piece positions
+  (works even when `a1` is empty)
 - **Engine**: `stockfish-18-lite-single` (single-threaded WASM, ~7 MB,
   GPLv3). Command: `go depth N movetime M`, result: bestmove + score
 - **Overlay**: fixed SVG layer with arrow + eval badge, tracks board

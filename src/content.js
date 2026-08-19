@@ -1,6 +1,9 @@
 (() => {
   'use strict';
 
+  const SITE = /lichess\.org/.test(location.hostname) ? 'lichess' : 'chesscom';
+  const ROLE_FIRST = { king: 'k', queen: 'q', rook: 'r', bishop: 'b', knight: 'n', pawn: 'p' };
+
   const OVERLAY_ID = 'chessmate-overlay';
   const SETTINGS_KEY = 'chessmateSettings';
   const DEFAULTS = {
@@ -146,14 +149,25 @@
   // ── Board element ──────────────────────────────────────
 
   function findBoardElement() {
-    const candidates = [
-      document.querySelector('chess-board'),
-      document.querySelector('wc-chess-board'),
-      document.querySelector('#board-layout-chessboard'),
-      document.querySelector('.board'),
-      document.querySelector('[class*="board-layout"]'),
-      document.querySelector('[class*="board"]')
-    ].filter(Boolean);
+    let candidates;
+    if (SITE === 'lichess') {
+      candidates = [
+        document.querySelector('.main-board'),
+        document.querySelector('.cg-wrap'),
+        document.querySelector('cg-board'),
+        document.querySelector('#board')
+      ];
+    } else {
+      candidates = [
+        document.querySelector('chess-board'),
+        document.querySelector('wc-chess-board'),
+        document.querySelector('#board-layout-chessboard'),
+        document.querySelector('.board'),
+        document.querySelector('[class*="board-layout"]'),
+        document.querySelector('[class*="board"]')
+      ];
+    }
+    candidates = candidates.filter(Boolean);
     const visible = candidates.find((c) => c.isConnected && c.getBoundingClientRect().width > 0);
     return visible || candidates[0] || null;
   }
@@ -182,6 +196,15 @@
   function isBoardFlipped() {
     try {
       if (!boardEl) return false;
+
+      // lichess: chessground marks orientation on the cg-wrap
+      if (SITE === 'lichess') {
+        const wrap = boardEl.closest('.cg-wrap') || (boardEl.querySelector && boardEl.querySelector('.cg-wrap')) || boardEl;
+        if (wrap && wrap.classList) {
+          if (wrap.classList.contains('orientation-black')) return true;
+          if (wrap.classList.contains('orientation-white')) return false;
+        }
+      }
 
       // 1) orientation attribute (reliable on chess.com live)
       const orient = boardEl.getAttribute('orientation');
@@ -266,6 +289,10 @@
   function getFenFromDom() {
     if (!boardEl) return null;
 
+    // lichess: FEN from the /analysis/<FEN> URL, or rebuild from chessground
+    // piece DOM (live games, puzzles, analysis after moves)
+    if (SITE === 'lichess') return getLichessFen();
+
     // 1) data-fen attribute (full FEN, updated every move) — incl. shadow DOM
     const roots = [boardEl, boardEl.shadowRoot].filter(Boolean);
     for (const r of roots) {
@@ -293,6 +320,94 @@
 
     // 4) reconstruct from piece DOM (light + shadow)
     return fenFromPieces();
+  }
+
+  function getLichessFen() {
+    const urlFen = lichessFenFromUrl();
+    if (urlFen) return urlFen;
+    return lichessFenFromPieces();
+  }
+
+  function lichessFenFromUrl() {
+    // e.g. /analysis/8/8/8/4k3/8/8/8/4K2R_w_K_-_0_1 (each rank is a path
+    // segment, underscores stand for spaces)
+    const m = /^\/analysis\/([^#?]+)/.exec(location.pathname);
+    if (!m) return null;
+    const fen = m[1].replace(/_/g, ' ');
+    return isValidFen(fen) ? fen : null;
+  }
+
+  function lichessFenFromPieces() {
+    const pieces = queryAllInShadow(boardEl, 'piece');
+    if (pieces.length === 0) return null;
+
+    const grid = Array.from({ length: 8 }, () => Array(8).fill(null));
+    const rect = boardRect();
+    const sq = rect && rect.width > 0 ? rect.width / 8 : 0;
+    let seen = 0;
+
+    for (const p of pieces) {
+      let color = null;
+      let role = null;
+      const dr = p.getAttribute && p.getAttribute('data-role');
+      const dc = p.getAttribute && p.getAttribute('data-color');
+      if (dc && ROLE_FIRST[dr]) {
+        color = dc;
+        role = ROLE_FIRST[dr];
+      } else {
+        for (const c of p.classList) {
+          if (c === 'white' || c === 'black') color = c;
+          else if (ROLE_FIRST[c]) role = ROLE_FIRST[c];
+        }
+      }
+      if (!color || !role) continue;
+
+      let col = -1;
+      let row = -1;
+      const style = p.getAttribute && (p.getAttribute('style') || '');
+      const t = /translate\(\s*([-\d.]+)(%|px),\s*([-\d.]+)(%|px)\s*\)/.exec(style);
+      if (t) {
+        if (t[2] === '%') col = Math.round(parseFloat(t[1]) / 100);
+        else col = sq ? Math.round(parseFloat(t[1]) / sq) : -1;
+        if (t[4] === '%') row = Math.round(parseFloat(t[3]) / 100);
+        else row = sq ? Math.round(parseFloat(t[3]) / sq) : -1;
+      } else if (rect && sq > 0) {
+        // geometry fallback: chessground rotates the board 180° when flipped
+        const pr = p.getBoundingClientRect();
+        col = Math.round((pr.left - rect.left) / sq);
+        row = Math.round((pr.top - rect.top) / sq);
+        if (isBoardFlipped()) {
+          col = 7 - col;
+          row = 7 - row;
+        }
+      }
+      if (col < 0 || col > 7 || row < 0 || row > 7) continue;
+      if (grid[row][col]) continue;
+      grid[row][col] = color === 'white' ? role.toUpperCase() : role;
+      seen++;
+    }
+
+    if (seen === 0) return null;
+
+    let placement = '';
+    for (let r = 0; r < 8; r++) {
+      let empty = 0;
+      for (let c = 0; c < 8; c++) {
+        const pc = grid[r][c];
+        if (pc) {
+          if (empty) { placement += empty; empty = 0; }
+          placement += pc;
+        } else {
+          empty++;
+        }
+      }
+      if (empty) placement += empty;
+      if (r < 7) placement += '/';
+    }
+
+    const turn = detectTurn();
+    const castling = detectCastling(grid);
+    return `${placement} ${turn} ${castling} - 0 1`;
   }
 
   function fenFromPieces() {
@@ -383,6 +498,18 @@
   }
 
   function detectTurn() {
+    if (SITE === 'lichess') {
+      // lichess: the running clock tells whose turn it is (bottom = my side)
+      const running = document.querySelector('.clock.clock-running, [class*="clock-running"]');
+      if (running) {
+        const myColor = isBoardFlipped() ? 'b' : 'w';
+        if (running.classList.contains('clock-bottom') || running.classList.contains('clock-player-bottom') || running.id === 'clock_bottom') {
+          return myColor;
+        }
+        return myColor === 'w' ? 'b' : 'w';
+      }
+      return detectTurnFromMoveList();
+    }
     // 1) running clock: the active clock tells whose turn it is
     const activeClock = document.querySelector('.clock-player-turn, [class*="clock-player-turn"]');
     if (activeClock) {
@@ -401,6 +528,7 @@
       const text = (m.innerText || m.textContent || '').trim();
       if (m.classList.contains('empty')) continue;
       if (/^\d+\.\.?\.?\s*$/.test(text)) continue;
+      if (/^[0-9½]+-[0-9½]+$/.test(text)) continue;
       count++;
     }
     if (count === 0) return 'w';
@@ -408,6 +536,21 @@
   }
 
   function moveNodes() {
+    if (SITE === 'lichess') {
+      // lichess move list: .tview2 with <san> tags (or .move divs)
+      const containers = document.querySelectorAll('.tview2, [class*="tview"], [class*="moves"]');
+      const out = [];
+      for (const c of containers) {
+        const sans = Array.from(c.querySelectorAll('san, .san'));
+        if (sans.length) {
+          out.push(...sans);
+          continue;
+        }
+        const moves = Array.from(c.querySelectorAll('.move'));
+        out.push(...moves.filter((m) => !m.querySelector('san, .san')));
+      }
+      return out;
+    }
     const containers = document.querySelectorAll('vertical-move-list, .move-list, .move-list-component, div[class*="move-list"], div[class*="move-list-component"]');
     let moves = [];
     if (containers.length) {
@@ -426,13 +569,14 @@
       const text = (m.innerText || m.textContent || '').trim();
       if (m.classList.contains('empty')) continue;
       if (/^\d+\.\.?\.?\s*$/.test(text)) continue;
+      if (/^[0-9½]+-[0-9½]+$/.test(text)) continue;
       count++;
     }
     return count;
   }
 
   function readClockMs() {
-    const el = document.querySelector('.clock-bottom, [class*="clock-bottom"], .clock-player-bottom, [class*="clock-player-bottom"]');
+    const el = document.querySelector('.clock-bottom, [class*="clock-bottom"], .clock-player-bottom, [class*="clock-player-bottom"], #clock_bottom');
     if (!el) return null;
     const text = (el.innerText || el.textContent || '').trim();
     if (!text) return null;
@@ -452,6 +596,7 @@
   function detectTimeControl() {
     if (detectedTimeMin !== null) return detectedTimeMin;
     const patterns = [
+      { re: /(\d+)\s*\+\s*(\d+)/, parse: (m) => Math.max(1, parseInt(m[1], 10) + parseInt(m[2], 10) / 2) },
       { re: /(\d+)\s*\|\s*(\d+)/, parse: (m) => Math.max(1, parseInt(m[1], 10) + parseInt(m[2], 10) / 2) },
       { re: /(\d+)\s*min\b/i, parse: (m) => Math.max(1, parseInt(m[1], 10)) }
     ];
@@ -548,11 +693,18 @@
   // ── Mode / turn logic ──────────────────────────────────
 
   function isAnalysisView() {
+    if (SITE === 'lichess') {
+      return /^\/(analysis|study|training|learn|puzzle)/.test(location.pathname) ||
+        !!document.querySelector('.analyse, [class*="analyse"]');
+    }
     return /\/analysis(?:\?|$|\/)/.test(location.pathname) ||
       !!document.querySelector('.analysis-tools, .analysis-sidebar, [class*="analysis"]');
   }
 
   function isLiveView() {
+    if (SITE === 'lichess') {
+      return /^\/(game|watch)\//.test(location.pathname);
+    }
     return /\/game\/live\//.test(location.pathname) ||
       /\/play\/online/.test(location.pathname) ||
       /\/play\/computer/.test(location.pathname);
@@ -873,6 +1025,9 @@
   }
 
   function isGameOver() {
+    if (SITE === 'lichess') {
+      return !!document.querySelector('.game-over, .game-ended, .tview2 .result, [class*="game-over"], [class*="game-ended"], .rematch');
+    }
     return !!document.querySelector('.game-over-modal, .modal-game-over-component, .game-over-header-component, [class*="game-over"]');
   }
 
@@ -1324,11 +1479,12 @@
   function clickPromotion(piece) {
     const board = findBoardElement();
     if (!board) return;
-    const els = queryAllInShadow(board, '.promotion-piece, [class*="promotion"] [data-piece], [class*="promotion"] [class*="piece"]');
+    const els = queryAllInShadow(board, '.promotion-piece, [class*="promotion"] [data-piece], [class*="promotion"] [class*="piece"], [class*="promotion"] piece, [class*="promotion"] [data-role]');
+    const fullName = ROLE_FIRST[piece] === piece ? piece : Object.keys(ROLE_FIRST).find((k) => ROLE_FIRST[k] === piece) || '';
     const target = els.find((el) => {
       const cls = typeof el.className === 'string' ? el.className : '';
-      const dp = el.getAttribute && el.getAttribute('data-piece');
-      return cls.indexOf(piece) >= 0 || (dp && dp.toLowerCase().indexOf(piece) >= 0);
+      const dp = el.getAttribute && (el.getAttribute('data-piece') || el.getAttribute('data-role') || '');
+      return cls.indexOf(piece) >= 0 || cls.indexOf(fullName) >= 0 || dp.toLowerCase().indexOf(piece) >= 0 || (fullName && dp.toLowerCase().indexOf(fullName) >= 0);
     });
     if (!target) {
       debugLog('auto-play promotion: piece ' + piece + ' not found among ' + els.length + ' candidates, aborting');
@@ -1393,6 +1549,7 @@
   }
 
   function isLobby() {
+    if (SITE === 'lichess') return false;
     return location.pathname.indexOf('/play/online') === 0 || !!document.querySelector('[class*="lobby"]');
   }
 
@@ -1442,7 +1599,7 @@
     setAutoQueue();
     if (isLobby()) {
       doLobbyQueue();
-    } else {
+    } else if (SITE === 'chesscom') {
       location.href = 'https://www.chess.com/play/online';
     }
   }
@@ -1458,6 +1615,7 @@
   }
 
   function doLobbyQueue() {
+    if (SITE !== 'chesscom') return clearAutoQueue();
     const time = String(settings.autoNextTime || '10');
     const safe = time.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const findCard = () => findElByText(new RegExp('^\\s*' + safe + '\\s*min', 'i'),

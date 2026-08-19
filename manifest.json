@@ -2,13 +2,14 @@
   "manifest_version": 3,
   "name": "ChessMate - Best Move",
   "version": "1.2.0",
-  "description": "Shows the best move on chess.com using local Stockfish. For analysis and learning purposes.",
+  "description": "Shows the best move on chess.com and lichess.org using local Stockfish. For analysis and learning purposes.",
   "permissions": [
     "storage",
     "offscreen"
   ],
   "host_permissions": [
-    "https://www.chess.com/*"
+    "https://www.chess.com/*",
+    "https://lichess.org/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
@@ -31,7 +32,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.chess.com/*"
+        "https://www.chess.com/*",
+        "https://lichess.org/*"
       ],
       "js": [
         "src/content.js"
@@ -45,7 +47,8 @@
         "src/engine/*"
       ],
       "matches": [
-        "https://www.chess.com/*"
+        "https://www.chess.com/*",
+        "https://lichess.org/*"
       ]
     }
   ]
