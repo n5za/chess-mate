@@ -39,7 +39,7 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
           sync: { get: (d, cb) => cb({}), set: (o, cb) => { if (cb) cb(); }, remove: (k, cb) => { if (cb) cb(); } },
           onChanged: { addListener: () => {} }
         },
-        runtime: { sendMessage: (m) => { window.__sent.push(m); }, onMessage: { addListener: () => {} } }
+        runtime: { sendMessage: (m) => { window.__sent.push(m); }, onMessage: { addListener: (fn) => { window.__receive = fn; } } }
       };
     `;
     await page.evaluate(() => { window.__CHESSMATE_TEST__ = true; });
@@ -425,6 +425,73 @@ const SRC = fs.readFileSync(path.resolve(__dirname, '../src/content.js'), 'utf8'
       }, 700);
     }, 900);
   }));
+
+  await test('Elo: target clamps and selected engine move is preserved', null, () => ({
+    ok: window.__chessmate.getSettings().targetElo === 1320 &&
+      window.__chessmate.pickMoveToPlay({ move: 'e2e4', move2: 'd2d4', scoreCp: 20, score2Cp: 10 }) === 'e2e4'
+  }), { chessmateSettings: { strengthMode: 'elo', targetElo: 400, autoPlaySecondChance: 100 } });
+
+  await test('Elo: request carries the chosen target strength', () => {
+    const board = document.createElement('chess-board');
+    board.setAttribute('data-fen', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+    board.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:400px';
+    document.body.appendChild(board);
+  }, () => new Promise(resolve => setTimeout(() => {
+    const request = window.__sent.find(m => m.action === 'chessmate-analyze');
+    resolve({ ok: request?.strengthMode === 'elo' && request?.targetElo === 1800 && request?.movetime === 200 });
+  }, 600)), { chessmateSettings: { strengthMode: 'elo', targetElo: 1800 } });
+
+  await test('Fast search can be disabled without changing move timing', () => {
+    const board = document.createElement('chess-board');
+    board.setAttribute('data-fen', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+    board.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:400px';
+    document.body.appendChild(board);
+  }, () => new Promise(resolve => setTimeout(() => {
+    const request = window.__sent.find(m => m.action === 'chessmate-analyze');
+    const s = window.__chessmate.getSettings();
+    resolve({ ok: request?.movetime === 3000 && s.speed === 'slow' && s.naturalThink === true });
+  }, 600)), { chessmateSettings: { fastSearch: false, speed: 'slow', liveMovetime: 3000 } });
+
+  await test('Quick arrows render immediately despite a saved eight-second display delay', () => {
+    const board = document.createElement('chess-board');
+    board.setAttribute('data-fen', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+    board.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:400px';
+    document.body.appendChild(board);
+  }, () => new Promise(resolve => setTimeout(() => {
+    const request = window.__sent.find(m => m.action === 'chessmate-analyze');
+    if (!request) return resolve({ ok: false });
+    window.__receive({ action: 'chessmate-bestmove', requestId: request.requestId,
+      result: { move: 'e2e4', scoreCp: 20, scoreMate: null } });
+    resolve({ ok: !!document.querySelector('#chessmate-overlay svg') &&
+      window.__chessmate.getSettings().autoPlay === false });
+  }, 600)), { chessmateSettings: { fastSearch: true, delayMin: 8, delayMax: 8, autoPlay: false } });
+
+  // Exercise the actual popup markup and script, including saved Elo reload.
+  const popup = await browser.newPage();
+  await popup.evaluateOnNewDocument(() => {
+    window.saved = {};
+    window.chrome = {
+      runtime: {},
+      storage: {
+        local: { get: (_, cb) => cb(window.saved), set: (o, cb) => { Object.assign(window.saved, o); cb?.(); } },
+        sync: { get: (_, cb) => cb({}), set: (_, cb) => cb?.() },
+        onChanged: { addListener() {} }
+      }
+    };
+  });
+  await popup.goto('file://' + path.resolve(__dirname, '../src/popup/popup.html'));
+  const popupOK = await popup.evaluate(() => {
+    const mode = document.getElementById('strengthMode');
+    mode.value = 'elo'; mode.dispatchEvent(new Event('change'));
+    const elo = document.getElementById('targetElo');
+    elo.value = '1800'; elo.dispatchEvent(new Event('change'));
+    return saved.chessmateSettings.targetElo === 1800 && saved.chessmateSettings.strengthMode === 'elo' &&
+      !elo.disabled && saved.chessmateSettings.fastSearch === true && document.getElementById('movetime').disabled && document.getElementById('autoPlaySecondChance').disabled &&
+      !document.getElementById('idleMouse').checked && document.getElementById('saveStatus').textContent === 'Settings saved';
+  });
+  results.push(popupOK);
+  console.log((popupOK ? 'PASS' : 'FAIL') + ': popup saves Elo and disables conflicting move variation');
+  await popup.close();
 
   const passCount = results.filter(Boolean).length;
   console.log('\n==== CONTENT RESULT: ' + passCount + ' passed, ' + (results.length - passCount) + ' failed ====');

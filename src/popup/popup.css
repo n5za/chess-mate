@@ -117,3 +117,23 @@ footer {
   border-top: 1px solid #e5e7eb;
   padding-top: 8px;
 }
+
+/* A compact, keyboard-accessible control panel. */
+body { width: 320px; padding: 18px; background: #101822; color: #e4edf5; font-family: system-ui, sans-serif; line-height: 1.5; }
+header { margin-bottom: 18px; }
+.logo { font-size: 22px; letter-spacing: -.6px; }
+.strength-card { padding: 14px; border: 1px solid #345650; border-radius: 14px; background: linear-gradient(135deg, #19352f, #182433); }
+.eyebrow { color: #9be5c3; font-size: 10px; font-weight: 700; letter-spacing: 1.7px; }
+.hint { font-size: 11px; color: #acbecd; margin-bottom: 0; }
+.section-title { color: #9be5c3; border-color: #2b3a48; margin-top: 18px; }
+.row { margin: 12px 0; gap: 7px; }
+select { padding: 9px; background: #182532; color: #e4edf5; border-color: #3c5062; }
+input { accent-color: #7cdab1; }
+input[type="range"] { cursor: pointer; margin: 0; }
+.duo input { min-width: 0; }
+:focus-visible { outline: 2px solid #9be5c3; outline-offset: 3px; }
+.switch:focus-within { outline: 2px solid #9be5c3; outline-offset: 3px; border-radius: 22px; }
+input:disabled { opacity: .4; cursor: default; }
+.check { align-items: flex-start; }
+footer { border-color: #2b3a48; color: #98abba; }
+#saveStatus { color: #9be5c3; font-size: 11px; margin-bottom: 0; }

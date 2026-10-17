@@ -1,5 +1,6 @@
 let pendingTabs = new Map();
 let offscreenAlive = false;
+let offscreenCreation = null;
 
 function pingOffscreen(timeoutMs = 3000) {
   return new Promise((resolve) => {
@@ -22,7 +23,12 @@ function pingOffscreen(timeoutMs = 3000) {
   });
 }
 
-async function ensureOffscreen() {
+function ensureOffscreen() {
+  if (!offscreenCreation) offscreenCreation = openOffscreen().finally(() => { offscreenCreation = null; });
+  return offscreenCreation;
+}
+
+async function openOffscreen() {
   const apiOk = typeof chrome.offscreen !== 'undefined' && chrome.offscreen.hasDocument;
   const has = apiOk ? await chrome.offscreen.hasDocument() : false;
   if (has) {
@@ -53,10 +59,6 @@ async function ensureOffscreen() {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return false;
 
-  if (msg.action === 'chessmate-ping') {
-    sendResponse({ pong: true });
-    return false;
-  }
 
   if (msg.action === 'chessmate-analyze') {
     const tabId = sender.tab ? sender.tab.id : null;
@@ -68,8 +70,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: false });
           return;
         }
-        pendingTabs.set(msg.requestId, tabId);
-        chrome.runtime.sendMessage({ ...msg, action: 'chessmate-engine-analyze' });
+        const routedId = `${tabId}:${msg.requestId}`;
+        for (const [id, entry] of pendingTabs) {
+          if (entry.tabId === tabId || Date.now() - entry.created > 70000) pendingTabs.delete(id);
+        }
+        pendingTabs.set(routedId, { tabId, requestId: msg.requestId, created: Date.now() });
+        chrome.runtime.sendMessage({ ...msg, requestId: routedId, action: 'chessmate-engine-analyze' }).catch(() => { pendingTabs.delete(routedId); });
         sendResponse({ ok: true });
       })
       .catch((err) => {
@@ -87,7 +93,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: false });
           return;
         }
-        chrome.runtime.sendMessage({ action: 'chessmate-engine-reset' });
+        chrome.runtime.sendMessage({ action: 'chessmate-offscreen-reset' }).catch(() => {});
         sendResponse({ ok: true });
       })
       .catch((err) => {
@@ -98,10 +104,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === 'chessmate-bestmove') {
-    const tabId = pendingTabs.get(msg.requestId);
-    if (tabId === undefined) return false;
+    const entry = pendingTabs.get(msg.requestId);
+    if (entry === undefined) return false;
     pendingTabs.delete(msg.requestId);
-    chrome.tabs.sendMessage(tabId, msg).catch(() => {});
+    chrome.tabs.sendMessage(entry.tabId, { ...msg, requestId: entry.requestId }).catch(() => {});
     return false;
   }
 

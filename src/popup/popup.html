@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>ChessMate</title>
@@ -9,11 +9,32 @@
   <header>
     <span class="logo">♞ ChessMate</span>
     <label class="switch">
-      <input type="checkbox" id="enabled">
+      <input type="checkbox" id="enabled" aria-label="Enable ChessMate">
       <span class="slider"></span>
     </label>
   </header>
 
+  <section class="strength-card">
+    <div class="eyebrow">YOUR TRAINING PARTNER</div>
+    <div class="row">
+      <label for="strengthMode">Playing strength</label>
+      <select id="strengthMode">
+        <option value="full">Full engine strength</option>
+        <option value="elo">Target Elo</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="targetElo">Target Elo: <span id="targetEloVal">1600</span></label>
+      <input type="range" id="targetElo" min="1320" max="3190" step="10">
+    </div>
+    <p class="hint" id="strengthHint">Local Stockfish, full strength.</p>
+  </section>
+  <div class="section-title">Analysis settings</div>
+  <label class="check">
+    <input type="checkbox" id="fastSearch" checked>
+    Quick arrows · 200 ms search
+  </label>
+  <p class="hint">Shows the arrow as soon as the engine responds, without the display delay. Automatic move timing stays unchanged. Short searches can reduce accuracy.</p>
   <div class="row">
     <label for="mode">Mode</label>
     <select id="mode">
@@ -105,6 +126,7 @@
     </select>
   </div>
 
+  <p id="saveStatus" role="status" aria-live="polite">Loading settings…</p>
   <footer>
     Stockfish runs locally on your device.
   </footer>

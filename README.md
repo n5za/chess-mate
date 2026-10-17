@@ -1,5 +1,4 @@
 # ChessMate — Best Move for chess.com and lichess.org
-src/img&videa/Pasted image.png
 Chrome/Edge extension (Manifest V3) that shows the best move on chess.com
 **and lichess.org** using local Stockfish. Works on live games, analysis,
 studies and puzzles. No internet needed for the engine — Stockfish runs
@@ -58,23 +57,33 @@ offscreen.html + offscreen.js: runs Stockfish (Web Worker + WASM)
 - **Stale results**: request-id based, results are dropped if the position
   changed while the engine was thinking
 
-## Stealth protocol (anti-detection)
+## Fast search
 
-Reduces the chance of being flagged by chess.com Fair Play. None of this is
-a guarantee — engine use in rated play always carries risk.
+Quick arrows is enabled by default and caps engine thinking at **200 ms** in
+both live and analysis views. Board changes are coalesced over 16 ms and the
+arrow renders immediately on the result, bypassing the display delay. It does
+not change automatic move delays or
+mouse movement speed. Disable it in the popup to use the time sliders again.
+Startup, board detection and rendering add latency, so total response time is
+not guaranteed below 0.5 seconds. Short searches can reduce accuracy and Elo
+consistency.
 
-- **Hide mode** — `always` (default) / `only while holding Alt` / `only
-  while mouse is over the board`. Alt and hover modes keep the screen
-  clean for streams/screenshares: hold `Alt` or hover the board to peek.
-- **Think delay** — random delay (0–8 s, min–max range) before the arrow
-  appears in live games, so your reaction time looks human. Off by
-  default; ignored in analysis view.
-- **Your-turn only** — in live games the arrow never appears on the
-  opponent's turn (and analysis stops running).
-- **Instant hide** — press `Alt+Shift+S` anywhere on chess.com to toggle
-  the arrows on/off immediately (useful if someone enters the room).
-- **Blur safety** — the arrow hides automatically when the window loses
-  focus.
+## Target Elo (v1.3)
+
+Choose **Playing strength → Target Elo** in the popup, then set **1320–3190**.
+This is the range advertised by the bundled Stockfish engine. ChessMate enables
+Stockfish's native `UCI_LimitStrength` and `UCI_Elo` options and uses its final
+`bestmove`, including weaker choices. Full engine strength remains available.
+The old random second-choice setting is disabled in Elo mode so it cannot
+silently override the engine's strength selection.
+
+The number is an approximate engine rating, not a calibrated chess.com or
+lichess rating or a guarantee of human behavior. Search time, hardware and
+positions affect strength. Use it as a training setting.
+
+This release also fixes request collisions between tabs, premature search
+retries, engine reset/recovery, readiness checks and stale results after
+settings changes. The popup includes save feedback and keyboard focus styles.
 
 ## Settings (popup)
 
@@ -82,9 +91,10 @@ a guarantee — engine use in rated play always carries risk.
 |-----------------|---------|--------------------------------------|
 | Master switch   | on      | Enable/disable arrows                |
 | Mode            | both    | Live + Analysis / Live only / Analysis only |
-| Depth           | 16      | Engine search depth (8–24)           |
-| Analysis time   | 2.5s    | Max search time in analysis view     |
-| Live time       | 1.5s    | Max search time in live play         |
+| Playing strength | Full | Full engine or target Elo (1320–3190) |
+| Depth           | 22      | Engine search depth (8–24)           |
+| Analysis time   | 3s    | Max search time in analysis view     |
+| Live time       | 3s    | Max search time in live play         |
 | Show arrows     | always  | Always / while holding Alt / on hover |
 | Think delay     | 0–0s    | Random delay before showing in live  |
 | Only your turn  | on      | In live games, hide on opponent's turn |
@@ -118,5 +128,7 @@ Engine + routing and content-script logic are covered by automated tests
 run against Chrome for Testing:
 
 ```
-cd tests && node test-content.js       # content-script logic (lichess + chess.com)
+cd tests && npm ci
+node test-engine.js                  # engine lifecycle and routing regressions
+node test-content.js       # content-script logic (lichess + chess.com)
 ```

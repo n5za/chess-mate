@@ -14,6 +14,9 @@ let pendingSearch = null;
 let gen = 0;
 let currentGen = 0;
 let bestInfoGen = 0;
+let selectedMove = null;
+let strengthLimited = false;
+let candidates = new Map();
 
 function postToEngine(cmd) {
   if (!worker) return false;
@@ -27,12 +30,30 @@ function postToEngine(cmd) {
 
 function sendBestmove(requestId, result) {
   try {
-    chrome.runtime.sendMessage({
+    const delivery = chrome.runtime.sendMessage({
       action: 'chessmate-bestmove',
       requestId,
       result
     });
+    if (delivery?.catch) delivery.catch(() => {});
   } catch (e) {}
+}
+
+function resetEngine(retry = false) {
+  if (worker) worker.terminate();
+  worker = null;
+  isReady = false;
+  searching = false;
+  stopPending = false;
+  clearTimeout(searchTimeout);
+  searchTimeout = null;
+  if (currentRequestId !== null) sendBestmove(currentRequestId, null);
+  currentRequestId = null;
+  bestInfo = secondInfo = null;
+  bestInfoGen = 0;
+  if (!retry) initAttempts = 0;
+  if (retry) setTimeout(initEngine, 1200);
+  else initEngine();
 }
 
 function initEngine() {
@@ -43,7 +64,7 @@ function initEngine() {
     worker.onmessage = (e) => {
       const data = e.data;
       if (typeof data !== 'string') return;
-      if (data === 'uciok' || data === 'readyok') {
+      if (data === 'readyok') {
         isReady = true;
         initAttempts = 0;
         tryLaunch();
@@ -54,6 +75,7 @@ function initEngine() {
         return;
       }
       if (data.startsWith('bestmove')) {
+        selectedMove = data.split(/\s+/)[1];
         searching = false;
         if (searchTimeout) {
           clearTimeout(searchTimeout);
@@ -62,7 +84,7 @@ function initEngine() {
         if (stopPending) {
           stopPending = false;
           const id = currentRequestId;
-          const result = buildResult();
+          const result = null;
           currentRequestId = null;
           bestInfo = null;
           secondInfo = null;
@@ -76,9 +98,7 @@ function initEngine() {
     };
     worker.onerror = (e) => {
       console.error('[ChessMate] engine worker error:', e.message);
-      worker = null;
-      isReady = false;
-      setTimeout(initEngine, 1200);
+      resetEngine(true);
     };
     worker.postMessage('uci');
     worker.postMessage('setoption name Threads value 1');
@@ -92,7 +112,7 @@ function initEngine() {
 }
 
 function parseInfo(line) {
-  if (bestInfoGen !== currentGen) return;
+  if (!searching || bestInfoGen !== currentGen) return;
   const pvMatch = line.match(/\spv\s+(.+)$/);
   if (!pvMatch) return;
   const mpMatch = line.match(/\bmultipv\s+(\d+)/);
@@ -116,17 +136,20 @@ function parseInfo(line) {
     move: pvMatch[1].trim().split(/\s+/)[0],
     pv: pvMatch[1].trim().split(/\s+/).slice(0, 8).join(' ')
   };
+  candidates.set(entry.move, entry);
+  if (mp > 2) return;
   if (mp === 2) {
-    if (!secondInfo || seldepth >= secondInfo.seldepth) secondInfo = entry;
-  } else if (!bestInfo || seldepth >= bestInfo.seldepth) {
+    if (!secondInfo || depth >= secondInfo.depth) secondInfo = entry;
+  } else if (!bestInfo || depth >= bestInfo.depth) {
     bestInfo = entry;
   }
 }
 
 function buildResult() {
-  if (!bestInfo) return null;
-  const r = { ...bestInfo };
-  if (secondInfo) {
+  if (!selectedMove || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(selectedMove)) return null;
+  const info = candidates.get(selectedMove);
+  const r = { depth: 0, scoreCp: null, scoreMate: null, ...(info || {}), move: selectedMove, strengthLimited };
+  if (secondInfo && secondInfo.move !== selectedMove && !strengthLimited) {
     r.move2 = secondInfo.move;
     r.score2Cp = secondInfo.scoreCp;
     r.score2Mate = secondInfo.scoreMate;
@@ -157,12 +180,19 @@ function launchSearch(msg) {
   bestInfo = null;
   secondInfo = null;
   bestInfoGen = myGen;
+  selectedMove = null;
+  candidates.clear();
+  strengthLimited = msg.strengthMode === 'elo';
 
   if (isReady) {
+    const bounded = (v, min, max, fallback) => Number.isFinite(Number(v)) ? Math.max(min, Math.min(max, Math.round(Number(v)))) : fallback;
     const commands = [
-      'setoption name MultiPV value ' + (msg.multipv || 1),
+      'setoption name UCI_LimitStrength value ' + strengthLimited,
+      'setoption name UCI_Elo value ' + bounded(msg.targetElo, 1320, 3190, 1600),
+      'setoption name Skill Level value 20',
+      'setoption name MultiPV value ' + bounded(msg.multipv, 1, 2, 1),
       'position fen ' + msg.fen,
-      'go depth ' + (msg.depth || 16) + ' movetime ' + (msg.movetime || 2500)
+      'go depth ' + bounded(msg.depth, 1, 30, 22) + ' movetime ' + Math.max(100, Math.min(60000, Number(msg.movetime) || 3000))
     ];
     commands.forEach((c) => postToEngine(c));
     searching = true;
@@ -171,13 +201,13 @@ function launchSearch(msg) {
     initEngine();
   }
 
-  const guardMs = (msg.movetime || 2500) + 5000;
+  const guardMs = Math.max(100, Math.min(60000, Number(msg.movetime) || 3000)) + 5000;
   searchTimeout = setTimeout(() => {
     if (myGen !== currentGen || !currentRequestId) return;
     postToEngine('stop');
     setTimeout(() => {
       if (myGen !== currentGen || !currentRequestId) return;
-      finishSearch();
+      resetEngine();
     }, 400);
   }, guardMs);
 }
@@ -195,19 +225,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ pong: true });
     return false;
   }
-  if (msg.action === 'chessmate-engine-reset') {
-    if (worker) {
-      try { worker.terminate(); } catch (e) {}
-    }
-    worker = null;
-    isReady = false;
-    initAttempts = 0;
-    tryLaunch();
+  if (msg.action === 'chessmate-offscreen-reset') {
+    resetEngine();
     sendResponse({ ok: true });
     return false;
   }
   if (msg.action !== 'chessmate-engine-analyze') return false;
+  if (msg.requestId === currentRequestId || msg.requestId === pendingSearch?.requestId) {
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (typeof msg.fen !== 'string' || /[\r\n]/.test(msg.fen)) return false;
+  if (pendingSearch) sendBestmove(pendingSearch.requestId, null);
   pendingSearch = msg;
+  if (!worker) initEngine();
   if (searching) {
     stopPending = true;
     postToEngine('stop');

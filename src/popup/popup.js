@@ -1,7 +1,8 @@
 const $ = (id) => document.getElementById(id);
 const SETTINGS_KEY = 'chessmateSettings';
-const KEYS = ['enabled', 'mode', 'depth', 'movetime', 'liveMovetime', 'liveOnlyOwnTurn', 'showEval', 'hideMode', 'delayMin', 'delayMax', 'autoPlay', 'speed', 'autoPlaySecondChance', 'naturalThink', 'idleMouse', 'autoNextGame', 'autoNextTime'];
+const KEYS = ['fastSearch', 'strengthMode', 'targetElo', 'enabled', 'mode', 'depth', 'movetime', 'liveMovetime', 'liveOnlyOwnTurn', 'showEval', 'hideMode', 'delayMin', 'delayMax', 'autoPlay', 'speed', 'autoPlaySecondChance', 'naturalThink', 'idleMouse', 'autoNextGame', 'autoNextTime'];
 const DEFAULTS = {
+  fastSearch: true, strengthMode: 'full', targetElo: 1600,
   enabled: true, mode: 'both', depth: 22, movetime: 3000, liveMovetime: 3000,
   liveOnlyOwnTurn: true, showEval: true, hideMode: 'always', delayMin: 0, delayMax: 0,
   autoPlay: false, speed: 'auto', autoPlaySecondChance: 10, naturalThink: true,
@@ -34,7 +35,8 @@ function writeStore(data, cb) {
   const full = { ...DEFAULTS, ...(loaded || {}), ...data };
   chrome.storage.local.set({ [SETTINGS_KEY]: full }, () => {
     if (chrome.runtime.lastError) console.warn('[ChessMate] local save failed:', chrome.runtime.lastError);
-    if (cb) cb();
+    $('saveStatus').textContent = chrome.runtime.lastError ? 'Could not save. Please try again.' : 'Settings saved';
+    if (!chrome.runtime.lastError && cb) cb();
   });
   chrome.storage.sync.set({ [SETTINGS_KEY]: full }, () => {
     if (chrome.runtime.lastError) console.warn('[ChessMate] sync save failed:', chrome.runtime.lastError);
@@ -52,6 +54,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 readStore((storeData) => {
   loaded = storeData || {};
   const st = loaded;
+  $('strengthMode').value = st.strengthMode === 'elo' ? 'elo' : 'full';
+  $('targetElo').value = Math.max(1320, Math.min(3190, Number(st.targetElo) || 1600));
+  $('saveStatus').textContent = 'Ready';
+  $('fastSearch').checked = st.fastSearch !== false;
   $('enabled').checked = st.enabled !== false;
   $('mode').value = st.mode || 'both';
   $('depth').value = st.depth ?? 22;
@@ -66,7 +72,7 @@ readStore((storeData) => {
   $('speed').value = st.speed || 'auto';
   $('autoPlaySecondChance').value = st.autoPlaySecondChance ?? 10;
   $('naturalThink').checked = st.naturalThink !== false;
-  $('idleMouse').checked = st.idleMouse !== false;
+  $('idleMouse').checked = !!st.idleMouse;
   $('autoNextGame').checked = !!st.autoNextGame;
   $('autoNextTime').value = st.autoNextTime || '10';
   syncLabels();
@@ -74,6 +80,9 @@ readStore((storeData) => {
 
 function collect() {
   const data = {
+    fastSearch: $('fastSearch').checked,
+    strengthMode: $('strengthMode').value,
+    targetElo: Number($('targetElo').value),
     enabled: $('enabled').checked,
     mode: $('mode').value,
     depth: parseInt($('depth').value, 10),
@@ -92,11 +101,12 @@ function collect() {
     autoNextGame: $('autoNextGame').checked,
     autoNextTime: $('autoNextTime').value
   };
-  if (data.delayMax < data.delayMin) data.delayMax = data.delayMin;
+  if (data.delayMax < data.delayMin) { data.delayMax = data.delayMin; $('delayMax').value = data.delayMax; }
   return data;
 }
 
 function save() {
+  if (!loaded) return;
   const data = collect();
   const diff = {};
   for (const k of KEYS) {
@@ -114,6 +124,15 @@ function save() {
 }
 
 function syncLabels() {
+  $('delayMin').disabled = $('fastSearch').checked;
+  $('delayMax').disabled = $('fastSearch').checked;
+  $('movetime').disabled = $('fastSearch').checked;
+  $('liveMovetime').disabled = $('fastSearch').checked;
+  const limited = $('strengthMode').value === 'elo';
+  $('targetElo').disabled = !limited;
+  $('autoPlaySecondChance').disabled = limited;
+  $('targetEloVal').textContent = $('targetElo').value;
+  $('strengthHint').textContent = limited ? 'Approximate engine Elo (1320–3190). Varied moves chosen by Stockfish; online ratings differ.' : 'Local Stockfish, full strength. Choose Target Elo for a softer training partner.';
   $('depthVal').textContent = $('depth').value;
   $('movetimeVal').textContent = (parseInt($('movetime').value, 10) / 1000) + 's';
   $('liveMovetimeVal').textContent = (parseInt($('liveMovetime').value, 10) / 1000) + 's';

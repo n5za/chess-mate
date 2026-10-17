@@ -10,6 +10,9 @@
   const DEFAULTS = {
     enabled: true,
     mode: 'both',        // 'both' | 'live' | 'analysis'
+    strengthMode: 'full',
+    targetElo: 1600,
+    fastSearch: true,
     depth: 22,           // deep enough for ~2500-strength play
     movetime: 3000,
     liveMovetime: 3000,
@@ -101,6 +104,9 @@
   }
   function sanitizeSettings(s) {
     const out = { ...DEFAULTS, ...(s || {}) };
+    out.fastSearch = out.fastSearch !== false;
+    out.strengthMode = out.strengthMode === 'elo' ? 'elo' : 'full';
+    out.targetElo = clampInt(out.targetElo, 1320, 3190, 1600);
     out.depth = clampInt(out.depth, 1, 30, DEFAULTS.depth);
     out.movetime = clampInt(out.movetime, 100, 60000, DEFAULTS.movetime);
     out.liveMovetime = clampInt(out.liveMovetime, 100, 60000, DEFAULTS.liveMovetime);
@@ -141,10 +147,14 @@
   loadSettings();
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'sync' && area !== 'local') return;
+    if (area !== 'local') return;
     if (changes[SETTINGS_KEY] && changes[SETTINGS_KEY].newValue) {
       settings = sanitizeSettings(changes[SETTINGS_KEY].newValue);
       if (settings.autoPlay) gameMood = null;
+      requestId++;
+      clearBestMove();
+      currentFen = null;
+      update();
       return;
     }
     for (const k of Object.keys(changes)) {
@@ -767,7 +777,11 @@
       requestId: id,
       fen,
       depth: settings.depth,
-      movetime: isAnalysisView() ? settings.movetime : engineTimeMs(),
+      strengthMode: settings.strengthMode,
+      targetElo: settings.targetElo,
+      movetime: settings.fastSearch
+        ? Math.min(200, isAnalysisView() ? settings.movetime : engineTimeMs())
+        : (isAnalysisView() ? settings.movetime : engineTimeMs()),
       multipv: settings.autoPlay && (settings.autoPlaySecondChance || 0) > 0 ? 2 : 1
     };
     chrome.runtime.sendMessage(payload);
@@ -780,7 +794,7 @@
       clearTimeout(retryTimer);
       retryTimer = null;
     }
-    const retryMs = settings.retryMs || 2000;
+    const retryMs = Math.max(settings.retryMs || 2000, payload.movetime + 6000);
     retryTimer = setTimeout(() => {
       retryTimer = null;
       if (id !== requestId) return;
@@ -811,6 +825,8 @@
     if (msg.action === 'chessmate-toggle') {
       settings.enabled = !settings.enabled;
       if (!settings.enabled) {
+        requestId++;
+        currentFen = null;
         clearBestMove();
         clearOverlay();
       } else {
@@ -857,7 +873,7 @@
     }
     const inAnalysis = isAnalysisView();
     const delayMax = settings.delayMax || 0;
-    if (!inAnalysis && delayMax > 0) {
+    if (!settings.fastSearch && !inAnalysis && delayMax > 0) {
       const lo = Math.max(0, settings.delayMin || 0);
       const hi = Math.max(lo, delayMax);
       const d = lo + Math.random() * (hi - lo);
@@ -1018,7 +1034,7 @@
     mutationTimer = setTimeout(() => {
       mutationTimer = null;
       update();
-    }, 200);
+    }, settings.fastSearch ? 16 : 200);
   }
 
   function update() {
@@ -1398,6 +1414,8 @@
   }
 
   function pickMoveToPlay(result) {
+    if (result.strengthLimited || settings.strengthMode === 'elo') return result.move;
+    if (result.scoreMate != null || result.score2Mate != null) return result.move;
     const chance = Math.min(100, Math.max(0, settings.autoPlaySecondChance || 0));
     if (result.move2 && Math.random() * 100 < chance) {
       if (result.score2Cp != null && result.scoreCp != null && result.scoreCp - result.score2Cp > 120) {
