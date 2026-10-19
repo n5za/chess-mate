@@ -25,9 +25,9 @@ Use ChessMate for analysis and learning. The extension also includes live-board 
 
 ## Demo
 
-![ChessMate demo recording](src/img-videa/20260731_224051.gif)
+![ChessMate demo recording](src/img-videa/20261018_174752.gif)
 
-[Watch the MP4 demo](src/img-videa/20260731_224051.mp4). These recordings show an earlier version; the v1.3 settings panel has been redesigned.
+[Watch the MP4 demo](src/img-videa/20261018_174752.mp4). Recorded on chess.com with v1.3: live move arrows, evaluation display, and the redesigned settings panel in Target Elo mode.
 
 ## Installation
 
